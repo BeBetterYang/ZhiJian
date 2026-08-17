@@ -98,7 +98,7 @@ export function diffMindMapChangeToCommands(
     const currentNode = document.nodes[resolvedNodeId];
     if (!currentNode) return;
 
-    const nextContent = mindMapTextToContent(nextNode.data.text);
+    const nextContent = mindMapTextToContent(nextNode.data.text, nextNode.data.richText);
     if (currentNode.content !== nextContent) {
       commands.push(documentCommands.updateContent(resolvedNodeId, nextContent, {
         mergeKey: `mindmap-content:${resolvedNodeId}`,
