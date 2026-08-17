@@ -170,7 +170,9 @@ export function parseMarkdown(markdown: string, options: ParseMarkdownOptions = 
     const block = parseContentBlock(trimmed);
     const nodeId = appendNode(document, document.rootId, block);
     stack.length = 1;
-    stack.push({ level: 0, nodeId });
+    // 顶级 Block 在 stack 中保持 level -1：bullet (level>=0) 不会弹出它，
+    // 紧随其后的 `- xxx` 会作为该 Block 的 child，而非 Root 的兄弟
+    stack.push({ level: -1, nodeId });
     lastNodeId = nodeId;
   }
 

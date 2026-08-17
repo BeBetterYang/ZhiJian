@@ -36,13 +36,22 @@ function appendAttachments(lines: string[], node: ZhiJianNode, indent: string): 
   }
 }
 
-function appendNode(document: ZhiJianDocument, nodeId: NodeId, depth: number, lines: string[]): void {
+function serializeDescendant(document: ZhiJianDocument, nodeId: NodeId, depth: number, lines: string[]): void {
   const node = document.nodes[nodeId];
   if (!node) return;
   const indent = '  '.repeat(depth);
   lines.push(`${indent}- ${serializeNodeLine(node)}`);
   appendAttachments(lines, node, `${indent}  `);
-  node.children.forEach((childId) => appendNode(document, childId, depth + 1, lines));
+  node.children.forEach((childId) => serializeDescendant(document, childId, depth + 1, lines));
+}
+
+// Root 的直接 child 始终表现为顶级 Block（无 bullet），其 descendants 才使用 `-` 列表项
+function serializeRootChild(document: ZhiJianDocument, nodeId: NodeId, lines: string[]): void {
+  const node = document.nodes[nodeId];
+  if (!node) return;
+  lines.push(serializeNodeLine(node));
+  appendAttachments(lines, node, '');
+  node.children.forEach((childId) => serializeDescendant(document, childId, 0, lines));
 }
 
 export function serializeMarkdown(document: ZhiJianDocument): string {
@@ -50,14 +59,7 @@ export function serializeMarkdown(document: ZhiJianDocument): string {
   const lines = [`# ${stripDangerousInlineHtml(root?.content || document.title || '未命名')}`, ''];
   appendAttachments(lines, root, '');
   root.children.forEach((childId) => {
-    const child = document.nodes[childId];
-    if (!child) return;
-    if (child.children.length === 0 && !child.todo?.enabled) {
-      lines.push(serializeNodeLine(child));
-      appendAttachments(lines, child, '');
-    } else {
-      appendNode(document, childId, 0, lines);
-    }
+    serializeRootChild(document, childId, lines);
     lines.push('');
   });
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
