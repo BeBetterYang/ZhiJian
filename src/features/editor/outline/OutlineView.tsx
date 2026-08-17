@@ -15,12 +15,10 @@ import {
 import { useDocumentStore } from '../hooks/useDocumentStore';
 import { diffOutlinerChangeToCommands, documentToOutlinerData, getOutlineBreadcrumb, getOutlineTitle } from './outlineAdapter';
 import { createOutlineViewState } from './outlineViewState';
-import type { MutableOutlineViewState, OutlineHistoryControls } from './outlineTypes';
+import type { MutableOutlineViewState } from './outlineTypes';
 
 type Props = {
   store: DocumentStore;
-  onTitleChange?: (title: string) => void;
-  onHistoryReady?: (controls: OutlineHistoryControls) => void;
 };
 
 function renderInlineMarkdown(text: string) {
@@ -76,13 +74,13 @@ function getCaretOffset(editable: HTMLElement) {
   return prefix.toString().length;
 }
 
-export default function OutlineView({ store, onTitleChange, onHistoryReady }: Props) {
+export default function OutlineView({ store }: Props) {
   const snapshot = useDocumentStore(store);
   const document = snapshot.document as ZhiJianDocument;
   const [viewState, setViewState] = useState<MutableOutlineViewState>(() => createOutlineViewState(document));
   const previousDataRef = useRef<OutlineData[]>([]);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const [renderVersion, setRenderVersion] = useState(0);
+  const isComposingRef = useRef(false);
 
   const outlinerData = useMemo(() => documentToOutlinerData(document, viewState), [document, viewState]);
   const title = getOutlineTitle(document, viewState);
@@ -92,30 +90,9 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
     previousDataRef.current = outlinerData;
   }, [outlinerData]);
 
-  const forceOutlinerSync = useCallback(() => {
-    setRenderVersion((version) => version + 1);
-  }, []);
-
   const runCommands = useCallback((commands: ReturnType<typeof diffOutlinerChangeToCommands>['commands']) => {
-    commands.forEach((command) => store.execute(command));
-    if (commands.length > 0) forceOutlinerSync();
-  }, [forceOutlinerSync, store]);
-
-  const undo = useCallback(() => {
-    const changed = store.undo();
-    if (changed) forceOutlinerSync();
-    return changed;
-  }, [forceOutlinerSync, store]);
-
-  const redo = useCallback(() => {
-    const changed = store.redo();
-    if (changed) forceOutlinerSync();
-    return changed;
-  }, [forceOutlinerSync, store]);
-
-  useEffect(() => {
-    onHistoryReady?.({ undo, redo });
-  }, [onHistoryReady, redo, undo]);
+    store.executeTransaction(commands);
+  }, [store]);
 
   const handleOutlinerChange = useCallback((nextData: OutlineData[]) => {
     const result = diffOutlinerChangeToCommands({
@@ -132,13 +109,11 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
     const nextTitle = event.currentTarget.textContent || '未命名';
     if (nextTitle === getNode(document, document.rootId).content) return;
     store.execute(documentCommands.updateContent(document.rootId, nextTitle, { mergeKey: `outline-title:${document.rootId}` }));
-    onTitleChange?.(nextTitle);
-  }, [document, onTitleChange, store]);
+  }, [document, store]);
 
   const focusNode = useCallback((nodeId: NodeId | null) => {
     setViewState((current) => ({ ...current, focusNodeId: nodeId }));
-    forceOutlinerSync();
-  }, [forceOutlinerSync]);
+  }, []);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -146,19 +121,19 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!shell.contains(event.target as Node)) return;
-      if (event.isComposing) return;
+      if (event.isComposing || isComposingRef.current) return;
       const command = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (command && key === 'z' && !event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
-        undo();
+        store.undo();
         return;
       }
       if (command && (key === 'y' || key === 'z' && event.shiftKey)) {
         event.preventDefault();
         event.stopPropagation();
-        redo();
+        store.redo();
         return;
       }
 
@@ -173,12 +148,10 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
         event.preventDefault();
         event.stopPropagation();
         store.execute(documentCommands.deleteNode(nodeId));
-        forceOutlinerSync();
       } else if (caretOffset === 0 && getPreviousVisibleNodeId(document, nodeId)) {
         event.preventDefault();
         event.stopPropagation();
         store.execute(documentCommands.mergeNode(nodeId));
-        forceOutlinerSync();
       }
     };
 
@@ -189,7 +162,6 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
         event.preventDefault();
         event.stopPropagation();
         store.execute(documentCommands.setTodoChecked(todo.dataset.zjOutlineTodo, !todo.checked));
-        forceOutlinerSync();
         return;
       }
       if (target?.closest('.outline-item-dot')) {
@@ -200,13 +172,25 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
       }
     };
 
+    const handleCompositionStart = () => {
+      isComposingRef.current = true;
+    };
+
+    const handleCompositionEnd = () => {
+      isComposingRef.current = false;
+    };
+
     window.addEventListener('keydown', onKeyDown, true);
     shell.addEventListener('click', onClick, true);
+    shell.addEventListener('compositionstart', handleCompositionStart, true);
+    shell.addEventListener('compositionend', handleCompositionEnd, true);
     return () => {
       window.removeEventListener('keydown', onKeyDown, true);
       shell.removeEventListener('click', onClick, true);
+      shell.removeEventListener('compositionstart', handleCompositionStart, true);
+      shell.removeEventListener('compositionend', handleCompositionEnd, true);
     };
-  }, [document, focusNode, forceOutlinerSync, redo, store, undo]);
+  }, [document, focusNode, store]);
 
   return (
     <div className="outline-editor zj-outline-shell" ref={shellRef}>
@@ -231,7 +215,7 @@ export default function OutlineView({ store, onTitleChange, onHistoryReady }: Pr
           {title}
         </h1>
         <Outliner
-          key={`${document.updatedAt}-${renderVersion}-${viewState.focusNodeId ?? 'root'}`}
+          key={viewState.focusNodeId ?? 'root'}
           data={outlinerData}
           onChange={handleOutlinerChange}
           markdown={(text, item) => renderNodeContent(document, text, item)}

@@ -2,11 +2,12 @@ import { cloneDocument, type ZhiJianDocument } from './documentTypes';
 import type { DocumentCommand } from './documentCommands';
 
 export const DEFAULT_HISTORY_MAX_ENTRIES = 100;
+export type HistoryCommand = DocumentCommand | { type: 'transaction'; commands: DocumentCommand[] };
 
 export interface HistoryEntry {
   before: ZhiJianDocument;
   after: ZhiJianDocument;
-  command: DocumentCommand;
+  command: HistoryCommand;
   timestamp: number;
   mergeKey?: string;
 }

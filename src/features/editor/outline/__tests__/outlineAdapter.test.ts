@@ -180,4 +180,162 @@ describe('outline adapter', () => {
     expect(store.redo()).toBe(true);
     expect(store.getDocument().nodes.b.todo?.checked).toBe(true);
   });
+
+  it('keeps IME composition events out of structural command diff', () => {
+    const { document, viewState } = createOutlineFixture();
+    const previousData = documentToOutlinerData(document, viewState);
+    const nextData = previousData.map((item) => item.id === 'a' ? { ...item, topic: '产品规划' } : item);
+    const result = diffOutlinerChangeToCommands({ document, previousData, nextData, viewState });
+
+    expect(result.commands).toEqual([
+      documentCommands.updateContent('a', '产品规划', { mergeKey: 'outline-content:a' }),
+    ]);
+    expect(result.commands.some((command) => ['createNode', 'deleteNode', 'moveNode', 'splitNode', 'mergeNode', 'indentNode', 'outdentNode'].includes(command.type))).toBe(false);
+  });
+
+  it('supports Enter at end as createNode and undo restores the previous tree', () => {
+    const { document, viewState } = createOutlineFixture();
+    const store = createDocumentStore(document);
+    const previousData = documentToOutlinerData(store.getDocument(), viewState);
+    const nextData = [
+      previousData[0],
+      { id: 'new-outliner-node', topic: '', children: [] },
+      previousData[1],
+      previousData[2],
+    ];
+    const result = diffOutlinerChangeToCommands({ document: store.getDocument(), previousData, nextData, viewState });
+    store.executeTransaction(result.commands);
+    const createdId = result.idReplacements.get('new-outliner-node');
+
+    expect(createdId).toBeTruthy();
+    expect(store.getDocument().nodes.root.children).toEqual(['a', createdId, 'b', 'c']);
+    expect(store.undo()).toBe(true);
+    expect(store.getDocument().nodes.root.children).toEqual(['a', 'b', 'c']);
+  });
+
+  it('supports split and undo using stable original node ID plus new UUID', () => {
+    let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'hello', content: 'Hello' },
+    }));
+    const store = createDocumentStore(document);
+    const viewState = createOutlineViewState(document);
+    const previousData = documentToOutlinerData(document, viewState);
+    const nextData = [
+      { id: 'hello', topic: 'Hel', children: [] },
+      { id: 'outliner-split', topic: 'lo', children: [] },
+    ];
+    const result = diffOutlinerChangeToCommands({ document, previousData, nextData, viewState });
+    store.executeTransaction(result.commands);
+    const newNodeId = result.idReplacements.get('outliner-split');
+
+    expect(store.getDocument().nodes.hello.content).toBe('Hel');
+    expect(store.getDocument().nodes.hello.id).toBe('hello');
+    expect(newNodeId).toBeTruthy();
+    expect(store.getDocument().nodes[newNodeId ?? '']?.content).toBe('lo');
+    expect(store.undo()).toBe(true);
+    expect(store.getDocument().nodes.hello.content).toBe('Hello');
+    expect(store.getDocument().nodes[newNodeId ?? '']).toBeUndefined();
+  });
+
+  it('supports Backspace merge and undo restoring two nodes', () => {
+    let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'hello', content: 'Hello' },
+    }));
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'world', content: 'World' },
+    }));
+    const store = createDocumentStore(document);
+
+    store.execute(documentCommands.mergeNode('world'));
+    expect(store.getDocument().nodes.hello.content).toBe('HelloWorld');
+    expect(store.getDocument().nodes.world).toBeUndefined();
+    expect(validateDocument(store.getDocument()).valid).toBe(true);
+    expect(store.undo()).toBe(true);
+    expect(store.getDocument().nodes.hello.content).toBe('Hello');
+    expect(store.getDocument().nodes.world.content).toBe('World');
+  });
+
+  it('keeps tree valid through repeated Tab and Shift+Tab command cycles', () => {
+    let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: 'A' },
+    }));
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'b', content: 'B' },
+    }));
+    const store = createDocumentStore(document);
+
+    for (let index = 0; index < 30; index += 1) {
+      store.execute(documentCommands.indentNode('b'));
+      expect(validateDocument(store.getDocument()).valid).toBe(true);
+      store.execute(documentCommands.outdentNode('b'));
+      expect(validateDocument(store.getDocument()).valid).toBe(true);
+    }
+
+    expect(store.getDocument().nodes.root.children).toEqual(['a', 'b']);
+  });
+
+  it('keeps node IDs stable through repeated drag-style moveNode commands', () => {
+    let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      document = reduceDocument(document, documentCommands.createNode({
+        type: 'createNode',
+        parentId: 'root',
+        node: { id, content: id.toUpperCase() },
+      }));
+    }
+    const store = createDocumentStore(document);
+    const idsBefore = Object.keys(store.getDocument().nodes).sort();
+
+    for (let index = 0; index < 50; index += 1) {
+      const nodeId = ['a', 'b', 'c', 'd', 'e'][index % 5];
+      const parentId = index % 3 === 0 && nodeId !== 'a' ? 'a' : 'root';
+      const targetParent = store.getDocument().nodes[parentId];
+      const safeParentId = targetParent.children.includes(nodeId) || nodeId === parentId ? 'root' : parentId;
+      store.execute(documentCommands.moveNode({
+        nodeId,
+        parentId: safeParentId,
+        index: index,
+      }));
+      expect(validateDocument(store.getDocument()).valid).toBe(true);
+    }
+
+    expect(Object.keys(store.getDocument().nodes).sort()).toEqual(idsBefore);
+  });
+
+  it('keeps tree legal through create edit split indent drag delete undo redo flow', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: 'Hello' },
+    }));
+    store.execute(documentCommands.updateContent('a', 'HelloWorld'));
+    store.execute(documentCommands.splitNode('a', 5, 'b'));
+    store.execute(documentCommands.indentNode('b'));
+    store.execute(documentCommands.moveNode({ nodeId: 'b', parentId: 'root', index: 0 }));
+    store.execute(documentCommands.deleteNode('b'));
+
+    for (let index = 0; index < 6; index += 1) {
+      expect(store.undo()).toBe(true);
+      expect(validateDocument(store.getDocument()).valid).toBe(true);
+    }
+
+    for (let index = 0; index < 6; index += 1) {
+      expect(store.redo()).toBe(true);
+      expect(validateDocument(store.getDocument()).valid).toBe(true);
+    }
+  });
 });

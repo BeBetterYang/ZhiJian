@@ -345,6 +345,29 @@ describe('ZhiJian global history', () => {
     store.markSaved();
     expect(store.getSnapshot().dirty).toBe(false);
   });
+
+  it('keeps getSnapshot reference stable until store state changes', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    const snapshot1 = store.getSnapshot();
+    const snapshot2 = store.getSnapshot();
+    let emitCount = 0;
+    const unsubscribe = store.subscribe(() => {
+      emitCount += 1;
+    });
+
+    expect(snapshot1).toBe(snapshot2);
+    store.markSaved();
+    expect(emitCount).toBe(0);
+    expect(store.getSnapshot()).toBe(snapshot1);
+
+    store.execute(documentCommands.updateContent('root', '新标题'));
+    const snapshot3 = store.getSnapshot();
+    expect(snapshot3).not.toBe(snapshot1);
+    expect(snapshot3).toBe(store.getSnapshot());
+    expect(emitCount).toBe(1);
+
+    unsubscribe();
+  });
 });
 
 describe('ZhiJian core large tree benchmark', () => {

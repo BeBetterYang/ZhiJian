@@ -50,7 +50,12 @@ import NodeImgAdjust from 'simple-mind-map/src/plugins/NodeImgAdjust.js';
 import RichText from 'simple-mind-map/src/plugins/RichText.js';
 import OutlineEditor from './OutlineEditor';
 import type { LegacyMindMapNode as OutlineNode } from './legacyMindMapTypes';
-import type { OutlineHistoryControls } from './features/editor/outline/outlineTypes';
+import {
+  createDocument,
+  createDocumentStore,
+  documentCommands,
+  type DocumentStore,
+} from './features/editor/core';
 import SharedEditorToolbar from './SharedEditorToolbar';
 import EditableNodeTable, { type EditableTableData } from './EditableNodeTable';
 import EditableImageGallery from './EditableImageGallery';
@@ -1031,6 +1036,22 @@ function readStoredData(mapId: string, title: string) {
   }
 }
 
+function createEditorDocumentStore(mapId: string, title: string): DocumentStore {
+  const document = createDocument({
+    id: mapId,
+    title: title || '未命名',
+  });
+  const store = createDocumentStore(document);
+  store.execute(documentCommands.createNode({
+    type: 'createNode',
+    parentId: document.rootId,
+    node: {
+      content: '',
+    },
+  }), { recordHistory: false });
+  return store;
+}
+
 function readStoredDisplayMode(mapId: string, fallback: ViewMode) {
   const value = localStorage.getItem(`${DISPLAY_MODE_STORAGE_PREFIX}${mapId}`);
   return value === 'outline' || value === 'mindmap' ? value : fallback;
@@ -1101,7 +1122,7 @@ export default function MindMapEditor({
   const mapReady = readyMapId === mapId;
   const [activeNode, setActiveNode] = useState<MindMapNode | null>(null);
   const [activeNodes, setActiveNodes] = useState<MindMapNode[]>([]);
-  const outlineHistoryRef = useRef<OutlineHistoryControls | null>(null);
+  const [documentStore] = useState<DocumentStore>(() => createEditorDocumentStore(mapId, title));
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [descriptionNode, setDescriptionNode] = useState<MindMapNode | null>(null);
@@ -1123,12 +1144,22 @@ export default function MindMapEditor({
     onTitleChangeRef.current = onTitleChange;
   }, [onTitleChange]);
 
+  useEffect(() => {
+    let previousTitle = documentStore.getDocument().title;
+    return documentStore.subscribe(() => {
+      const nextDocument = documentStore.getDocument();
+      if (nextDocument.title === previousTitle) return;
+      previousTitle = nextDocument.title;
+      onTitleChangeRef.current?.(nextDocument.title);
+    });
+  }, [documentStore]);
+
   const undo = () => {
     if (mode !== 'outline') {
       mindMapRef.current?.execCommand('BACK');
       return;
     }
-    outlineHistoryRef.current?.undo();
+    documentStore.undo();
   };
 
   const redo = () => {
@@ -1136,7 +1167,7 @@ export default function MindMapEditor({
       mindMapRef.current?.execCommand('FORWARD');
       return;
     }
-    outlineHistoryRef.current?.redo();
+    documentStore.redo();
   };
 
   const hasActiveNode = activeNodes.length > 0;
@@ -2327,12 +2358,7 @@ export default function MindMapEditor({
           <div className="mind-outline-panel">
             <OutlineEditor
               key={mapId}
-              mapId={mapId}
-              title={title}
-              onTitleChange={onTitleChange}
-              onHistoryReady={(controls) => {
-                outlineHistoryRef.current = controls;
-              }}
+              store={documentStore}
             />
           </div>
         )}

@@ -29,26 +29,24 @@ export interface DocumentStoreSnapshot {
   dirty: boolean;
 }
 
-type Listener = (snapshot: DocumentStoreSnapshot) => void;
+type Listener = () => void;
 
 export class DocumentStore {
   #document: ZhiJianDocument;
   #history: DocumentHistoryState;
   #dirty = false;
+  #snapshot: DocumentStoreSnapshot;
   #listeners = new Set<Listener>();
 
   constructor(document: ZhiJianDocument, history = createHistoryState()) {
     assertValidDocument(document);
     this.#document = cloneDocument(document);
     this.#history = history;
+    this.#snapshot = this.#createSnapshot();
   }
 
   getSnapshot(): DocumentStoreSnapshot {
-    return {
-      document: this.#document,
-      history: this.#history,
-      dirty: this.#dirty,
-    };
+    return this.#snapshot;
   }
 
   getDocument(): ZhiJianDocument {
@@ -68,6 +66,33 @@ export class DocumentStore {
       this.#history = createHistoryState();
     }
 
+    this.#refreshSnapshot();
+    this.#emit();
+    return this.#document;
+  }
+
+  executeTransaction(commands: DocumentCommand[], options: ExecuteCommandOptions = {}): ZhiJianDocument {
+    if (commands.length === 0) return this.#document;
+    const before = this.#document;
+    let after = this.#document;
+    for (const command of commands) {
+      after = reduceDocument(after, command);
+    }
+    this.#document = after;
+    this.#dirty = true;
+
+    if (options.recordHistory !== false) {
+      this.#history = pushHistory(this.#history, {
+        before,
+        after,
+        command: { type: 'transaction', commands },
+        mergeKey: options.mergeKey,
+      }, options);
+    } else {
+      this.#history = createHistoryState();
+    }
+
+    this.#refreshSnapshot();
     this.#emit();
     return this.#document;
   }
@@ -78,6 +103,7 @@ export class DocumentStore {
     this.#document = result.document;
     this.#history = result.history;
     this.#dirty = true;
+    this.#refreshSnapshot();
     this.#emit();
     return true;
   }
@@ -88,12 +114,15 @@ export class DocumentStore {
     this.#document = result.document;
     this.#history = result.history;
     this.#dirty = true;
+    this.#refreshSnapshot();
     this.#emit();
     return true;
   }
 
   markSaved(): void {
+    if (!this.#dirty) return;
     this.#dirty = false;
+    this.#refreshSnapshot();
     this.#emit();
   }
 
@@ -102,9 +131,20 @@ export class DocumentStore {
     return () => this.#listeners.delete(listener);
   }
 
+  #createSnapshot(): DocumentStoreSnapshot {
+    return {
+      document: this.#document,
+      history: this.#history,
+      dirty: this.#dirty,
+    };
+  }
+
+  #refreshSnapshot(): void {
+    this.#snapshot = this.#createSnapshot();
+  }
+
   #emit(): void {
-    const snapshot = this.getSnapshot();
-    for (const listener of this.#listeners) listener(snapshot);
+    for (const listener of this.#listeners) listener();
   }
 }
 
