@@ -4,10 +4,13 @@ export interface TreeValidationIssue {
   code:
     | 'ROOT_MISSING'
     | 'ROOT_PARENT_INVALID'
+    | 'ROOT_BLOCK_TYPE_INVALID'
+    | 'CONTENT_BLOCK_TYPE_INVALID'
     | 'NODE_ID_MISMATCH'
     | 'PARENT_MISSING'
     | 'CHILD_MISSING'
     | 'PARENT_CHILD_MISMATCH'
+    | 'DUPLICATE_CHILD'
     | 'MULTIPLE_PARENTS'
     | 'CYCLE'
     | 'UNREACHABLE_NODE';
@@ -41,11 +44,27 @@ export function validateDocument(document: ZhiJianDocument): TreeValidationResul
     });
   }
 
+  if (root.blockType !== 'root') {
+    issues.push({
+      code: 'ROOT_BLOCK_TYPE_INVALID',
+      message: 'Root node must use the special root block type.',
+      nodeId: root.id,
+    });
+  }
+
   for (const [key, node] of Object.entries(document.nodes)) {
     if (key !== node.id) {
       issues.push({
         code: 'NODE_ID_MISMATCH',
         message: `Node map key "${key}" does not match node id "${node.id}".`,
+        nodeId: node.id,
+      });
+    }
+
+    if (node.id !== document.rootId && node.blockType === 'root') {
+      issues.push({
+        code: 'CONTENT_BLOCK_TYPE_INVALID',
+        message: 'Only the document root may use the root block type.',
         nodeId: node.id,
       });
     }
@@ -62,7 +81,7 @@ export function validateDocument(document: ZhiJianDocument): TreeValidationResul
     for (const childId of node.children) {
       if (childIds.has(childId)) {
         issues.push({
-          code: 'MULTIPLE_PARENTS',
+          code: 'DUPLICATE_CHILD',
           message: `Child "${childId}" appears more than once under "${node.id}".`,
           nodeId: childId,
         });

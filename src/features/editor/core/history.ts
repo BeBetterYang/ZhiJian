@@ -1,6 +1,8 @@
 import { cloneDocument, type ZhiJianDocument } from './documentTypes';
 import type { DocumentCommand } from './documentCommands';
 
+export const DEFAULT_HISTORY_MAX_ENTRIES = 100;
+
 export interface HistoryEntry {
   before: ZhiJianDocument;
   after: ZhiJianDocument;
@@ -12,18 +14,26 @@ export interface HistoryEntry {
 export interface DocumentHistoryState {
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
+  maxEntries: number;
 }
 
 export interface PushHistoryOptions {
   mergeKey?: string;
   timestamp?: number;
   mergeWindowMs?: number;
+  maxEntries?: number;
 }
 
-export function createHistoryState(): DocumentHistoryState {
+function limitEntries<T>(entries: T[], maxEntries: number): T[] {
+  if (entries.length <= maxEntries) return entries;
+  return entries.slice(entries.length - maxEntries);
+}
+
+export function createHistoryState(maxEntries = DEFAULT_HISTORY_MAX_ENTRIES): DocumentHistoryState {
   return {
     undoStack: [],
     redoStack: [],
+    maxEntries,
   };
 }
 
@@ -35,6 +45,7 @@ export function pushHistory(
   const timestamp = options.timestamp ?? Date.now();
   const mergeWindowMs = options.mergeWindowMs ?? 800;
   const mergeKey = options.mergeKey ?? entry.mergeKey;
+  const maxEntries = options.maxEntries ?? history.maxEntries ?? DEFAULT_HISTORY_MAX_ENTRIES;
   const previous = history.undoStack[history.undoStack.length - 1];
 
   if (
@@ -42,33 +53,39 @@ export function pushHistory(
     previous?.mergeKey === mergeKey &&
     timestamp - previous.timestamp <= mergeWindowMs
   ) {
-    return {
-      undoStack: [
-        ...history.undoStack.slice(0, -1),
-        {
-          before: cloneDocument(previous.before),
-          after: cloneDocument(entry.after),
-          command: entry.command,
-          timestamp,
-          mergeKey,
-        },
-      ],
-      redoStack: [],
-    };
-  }
-
-  return {
-    undoStack: [
-      ...history.undoStack,
+    const undoStack = [
+      ...history.undoStack.slice(0, -1),
       {
-        before: cloneDocument(entry.before),
+        before: previous.before,
         after: cloneDocument(entry.after),
         command: entry.command,
         timestamp,
         mergeKey,
       },
-    ],
+    ];
+
+    return {
+      undoStack: limitEntries(undoStack, maxEntries),
+      redoStack: [],
+      maxEntries,
+    };
+  }
+
+  const undoStack = [
+    ...history.undoStack,
+    {
+      before: cloneDocument(entry.before),
+      after: cloneDocument(entry.after),
+      command: entry.command,
+      timestamp,
+      mergeKey,
+    },
+  ];
+
+  return {
+    undoStack: limitEntries(undoStack, maxEntries),
     redoStack: [],
+    maxEntries,
   };
 }
 
@@ -83,13 +100,14 @@ export function undoHistory(
     document: cloneDocument(entry.before),
     history: {
       undoStack: history.undoStack.slice(0, -1),
-      redoStack: [
+      redoStack: limitEntries([
         ...history.redoStack,
         {
           ...entry,
-          after: cloneDocument(currentDocument),
+          after: currentDocument,
         },
-      ],
+      ], history.maxEntries),
+      maxEntries: history.maxEntries,
     },
     changed: true,
   };
@@ -105,14 +123,15 @@ export function redoHistory(
   return {
     document: cloneDocument(entry.after),
     history: {
-      undoStack: [
+      undoStack: limitEntries([
         ...history.undoStack,
         {
           ...entry,
-          before: cloneDocument(currentDocument),
+          before: currentDocument,
         },
-      ],
+      ], history.maxEntries),
       redoStack: history.redoStack.slice(0, -1),
+      maxEntries: history.maxEntries,
     },
     changed: true,
   };

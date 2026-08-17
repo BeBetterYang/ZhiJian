@@ -1,8 +1,14 @@
-import { createId, createNode, type NodeId, type ZhiJianDocument, type ZhiJianNode } from './documentTypes';
+import {
+  createId,
+  createNode,
+  type NodeId,
+  type ZhiJianContentBlockType,
+  type ZhiJianDocument,
+  type ZhiJianNode,
+} from './documentTypes';
 import type { DocumentCommand } from './documentCommands';
 import {
   getNode,
-  getNodeIndex,
   getParent,
   getPreviousSiblingId,
   getPreviousVisibleNodeId,
@@ -43,9 +49,8 @@ function applyMoveNode(document: ZhiJianDocument, nodeId: NodeId, parentId: Node
 
   let nextDocument = document;
   nextDocument = replaceNode(nextDocument, withoutChild(oldParent, nodeId));
-  const adjustedIndex = oldParent.id === nextParent.id && getNodeIndex(document, nodeId) < index ? index - 1 : index;
   const freshParent = getNode(nextDocument, nextParent.id);
-  nextDocument = replaceNode(nextDocument, insertChild(freshParent, nodeId, adjustedIndex));
+  nextDocument = replaceNode(nextDocument, insertChild(freshParent, nodeId, index));
   nextDocument = replaceNode(nextDocument, { ...node, parentId });
   return nextDocument;
 }
@@ -98,6 +103,7 @@ export function reduceDocument(
       }
       break;
     case 'setBlockType':
+      if (command.nodeId === document.rootId) throw new Error('Root node block type cannot be changed.');
       nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, blockType: command.blockType }));
       break;
     case 'setTodo':
@@ -133,11 +139,12 @@ export function reduceDocument(
       const parent = getParent(document, command.nodeId);
       if (!parent) throw new Error('Non-root node must have a parent.');
       const offset = Math.max(0, Math.min(command.offset, node.content.length));
+      const blockType = node.blockType as ZhiJianContentBlockType;
       const newNode = createNode({
         id: command.newNodeId ?? createId(),
         parentId: parent.id,
         content: node.content.slice(offset),
-        blockType: node.blockType,
+        blockType,
       });
       nextDocument = replaceNode(document, { ...node, content: node.content.slice(0, offset) });
       const freshParent = getNode(nextDocument, parent.id);

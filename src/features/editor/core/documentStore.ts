@@ -15,9 +15,17 @@ export interface ExecuteCommandOptions extends PushHistoryOptions {
   recordHistory?: boolean;
 }
 
+type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer U)[]
+    ? ReadonlyArray<DeepReadonly<U>>
+    : T extends object
+      ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+      : T;
+
 export interface DocumentStoreSnapshot {
-  document: ZhiJianDocument;
-  history: DocumentHistoryState;
+  document: DeepReadonly<ZhiJianDocument>;
+  history: DeepReadonly<DocumentHistoryState>;
   dirty: boolean;
 }
 
@@ -37,11 +45,8 @@ export class DocumentStore {
 
   getSnapshot(): DocumentStoreSnapshot {
     return {
-      document: cloneDocument(this.#document),
-      history: {
-        undoStack: [...this.#history.undoStack],
-        redoStack: [...this.#history.redoStack],
-      },
+      document: this.#document,
+      history: this.#history,
       dirty: this.#dirty,
     };
   }
@@ -51,7 +56,7 @@ export class DocumentStore {
   }
 
   execute(command: DocumentCommand, options: ExecuteCommandOptions = {}): ZhiJianDocument {
-    const before = cloneDocument(this.#document);
+    const before = this.#document;
     const after = reduceDocument(this.#document, command);
     this.#document = after;
     this.#dirty = true;
@@ -64,7 +69,7 @@ export class DocumentStore {
     }
 
     this.#emit();
-    return this.getDocument();
+    return this.#document;
   }
 
   undo(): boolean {

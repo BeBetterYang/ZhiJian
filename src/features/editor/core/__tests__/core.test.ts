@@ -8,6 +8,8 @@ import {
   type ZhiJianDocument,
 } from '../index';
 
+const orderedChildren = (document: ZhiJianDocument, nodeId = 'root') => document.nodes[nodeId].children;
+
 function createFixtureDocument(): ZhiJianDocument {
   let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
   document = reduceDocument(document, documentCommands.createNode({
@@ -28,6 +30,30 @@ function createFixtureDocument(): ZhiJianDocument {
   return document;
 }
 
+function createOrderedDocument(): ZhiJianDocument {
+  let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
+  for (const id of ['a', 'b', 'c', 'd']) {
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id, content: id.toUpperCase() },
+    }));
+  }
+  return document;
+}
+
+function createLargeDocument(count: number): ZhiJianDocument {
+  let document = createDocument({ id: 'large-doc', rootId: 'root', title: '性能基准', now: 1 });
+  for (let index = 0; index < count; index += 1) {
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: `node-${index}`, content: `Node ${index}` },
+    }), { validate: index % 100 === 99 });
+  }
+  return document;
+}
+
 describe('ZhiJian core document', () => {
   it('creates a normalized document with a stable root', () => {
     const document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 100 });
@@ -35,8 +61,16 @@ describe('ZhiJian core document', () => {
     expect(document.rootId).toBe('root');
     expect(document.nodes.root.parentId).toBeNull();
     expect(document.nodes.root.content).toBe('新手入门');
-    expect(document.nodes.root.blockType).toBe('heading2');
+    expect(document.nodes.root.blockType).toBe('root');
     expect(validateDocument(document).valid).toBe(true);
+  });
+
+  it('treats root as document root instead of a normal heading node', () => {
+    const document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 100 });
+
+    expect(document.nodes.root.blockType).toBe('root');
+    expect(() => reduceDocument(document, documentCommands.setBlockType('root', 'heading1')))
+      .toThrow('Root node block type cannot be changed');
   });
 
   it('supports createNode and deleteNode with subtree removal', () => {
@@ -59,6 +93,42 @@ describe('ZhiJian core document', () => {
 
     document = reduceDocument(document, documentCommands.reorderNode('b', 0));
     expect(document.nodes.root.children).toEqual(['b', 'a', 'a1']);
+    expect(validateDocument(document).valid).toBe(true);
+  });
+
+  it('uses final index semantics for same-parent reorder boundaries', () => {
+    let document = createOrderedDocument();
+
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'a', parentId: 'root', index: 4 }));
+    expect(orderedChildren(document)).toEqual(['b', 'c', 'd', 'a']);
+
+    document = createOrderedDocument();
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'd', parentId: 'root', index: 0 }));
+    expect(orderedChildren(document)).toEqual(['d', 'a', 'b', 'c']);
+
+    document = createOrderedDocument();
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'b', parentId: 'root', index: 2 }));
+    expect(orderedChildren(document)).toEqual(['a', 'c', 'b', 'd']);
+
+    document = createOrderedDocument();
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'c', parentId: 'root', index: 1 }));
+    expect(orderedChildren(document)).toEqual(['a', 'c', 'b', 'd']);
+  });
+
+  it('clamps move indexes and supports cross-parent move boundaries', () => {
+    let document = createOrderedDocument();
+
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'b', parentId: 'a', index: 0 }));
+    expect(orderedChildren(document, 'a')).toEqual(['b']);
+    expect(document.nodes.b.parentId).toBe('a');
+
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'c', parentId: 'a', index: 999 }));
+    expect(orderedChildren(document, 'a')).toEqual(['b', 'c']);
+    expect(document.nodes.c.parentId).toBe('a');
+
+    document = reduceDocument(document, documentCommands.moveNode({ nodeId: 'd', parentId: 'a', index: -10 }));
+    expect(orderedChildren(document, 'a')).toEqual(['d', 'b', 'c']);
+    expect(document.nodes.d.parentId).toBe('a');
     expect(validateDocument(document).valid).toBe(true);
   });
 
@@ -100,6 +170,20 @@ describe('ZhiJian core document', () => {
       .toThrow('own descendant');
   });
 
+  it('protects root from destructive or structural commands', () => {
+    const document = createFixtureDocument();
+
+    expect(() => reduceDocument(document, documentCommands.deleteNode('root'))).toThrow('Root node cannot be deleted');
+    expect(() => reduceDocument(document, documentCommands.moveNode({ nodeId: 'root', parentId: 'a', index: 0 })))
+      .toThrow('Root node cannot be moved');
+    expect(() => reduceDocument(document, documentCommands.indentNode('root'))).toThrow('Root node cannot be indented');
+    expect(() => reduceDocument(document, documentCommands.outdentNode('root'))).toThrow('Root node cannot be outdented');
+    expect(() => reduceDocument(document, documentCommands.splitNode('root', 1))).toThrow('Root node content cannot be split');
+    expect(() => reduceDocument(document, documentCommands.mergeNode('root'))).toThrow('Root node cannot be merged');
+    expect(() => reduceDocument(document, documentCommands.setBlockType('root', 'heading1')))
+      .toThrow('Root node block type cannot be changed');
+  });
+
   it('updates node properties through commands', () => {
     let document = createFixtureDocument();
     document = reduceDocument(document, documentCommands.setBlockType('a', 'heading1'));
@@ -134,6 +218,40 @@ describe('ZhiJian core document', () => {
     const result = validateDocument(broken);
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.code === 'PARENT_CHILD_MISMATCH')).toBe(true);
+  });
+
+  it('separates duplicate child and multiple parent validation errors', () => {
+    const document = createFixtureDocument();
+    const duplicateChild: ZhiJianDocument = {
+      ...document,
+      nodes: {
+        ...document.nodes,
+        root: {
+          ...document.nodes.root,
+          children: ['a', 'a', 'b'],
+        },
+      },
+    };
+
+    const duplicateResult = validateDocument(duplicateChild);
+    expect(duplicateResult.valid).toBe(false);
+    expect(duplicateResult.issues.some((issue) => issue.code === 'DUPLICATE_CHILD')).toBe(true);
+    expect(duplicateResult.issues.some((issue) => issue.code === 'MULTIPLE_PARENTS')).toBe(false);
+
+    const multipleParents: ZhiJianDocument = {
+      ...document,
+      nodes: {
+        ...document.nodes,
+        root: {
+          ...document.nodes.root,
+          children: ['a', 'b', 'a1'],
+        },
+      },
+    };
+
+    const multipleParentResult = validateDocument(multipleParents);
+    expect(multipleParentResult.valid).toBe(false);
+    expect(multipleParentResult.issues.some((issue) => issue.code === 'MULTIPLE_PARENTS')).toBe(true);
   });
 });
 
@@ -175,6 +293,47 @@ describe('ZhiJian global history', () => {
     expect(store.getDocument().nodes.a.content).toBe('');
   });
 
+  it('caps undo history to maxEntries while preserving recent undo operations', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: '0' },
+    }), { timestamp: 1 });
+
+    for (let index = 1; index <= 120; index += 1) {
+      store.execute(documentCommands.updateContent('a', String(index)), { timestamp: 1_000 + index, mergeKey: `edit:${index}` });
+    }
+
+    expect(store.getSnapshot().history.undoStack).toHaveLength(100);
+    expect(store.getDocument().nodes.a.content).toBe('120');
+
+    for (let index = 0; index < 100; index += 1) {
+      expect(store.undo()).toBe(true);
+    }
+
+    expect(store.getDocument().nodes.a.content).toBe('20');
+    expect(store.undo()).toBe(false);
+  });
+
+  it('keeps maxEntries when continuous text input is merged', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: '' },
+    }), { timestamp: 1 });
+
+    for (let index = 1; index <= 150; index += 1) {
+      store.execute(documentCommands.updateContent('a', String(index), { mergeKey: 'edit:a' }), { timestamp: index });
+    }
+
+    expect(store.getSnapshot().history.undoStack.length).toBeLessThanOrEqual(100);
+    expect(store.getSnapshot().history.undoStack).toHaveLength(2);
+    expect(store.undo()).toBe(true);
+    expect(store.getDocument().nodes.a.content).toBe('');
+  });
+
   it('marks dirty changes and supports markSaved', () => {
     const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
     expect(store.getSnapshot().dirty).toBe(false);
@@ -185,5 +344,42 @@ describe('ZhiJian global history', () => {
 
     store.markSaved();
     expect(store.getSnapshot().dirty).toBe(false);
+  });
+});
+
+describe('ZhiJian core large tree benchmark', () => {
+  it('handles 1000 nodes with updates, moves, undo, redo and validation', () => {
+    const startedAt = performance.now();
+    const store = createDocumentStore(createLargeDocument(1000));
+
+    for (let index = 0; index < 100; index += 1) {
+      store.execute(documentCommands.updateContent(`node-${index}`, `Updated ${index}`), {
+        timestamp: 10_000 + index,
+        mergeKey: `bulk-edit-${index}`,
+      });
+    }
+
+    for (let index = 0; index < 50; index += 1) {
+      store.execute(documentCommands.moveNode({
+        nodeId: `node-${index}`,
+        parentId: 'root',
+        index: 1000 - index,
+      }), { timestamp: 20_000 + index });
+    }
+
+    for (let index = 0; index < 50; index += 1) {
+      expect(store.undo()).toBe(true);
+    }
+
+    for (let index = 0; index < 50; index += 1) {
+      expect(store.redo()).toBe(true);
+    }
+
+    const result = validateDocument(store.getDocument());
+    const elapsedMs = performance.now() - startedAt;
+    console.info(`1000-node core benchmark: ${elapsedMs.toFixed(2)}ms`);
+
+    expect(result.valid).toBe(true);
+    expect(store.getDocument().nodes['node-0'].content).toBe('Updated 0');
   });
 });

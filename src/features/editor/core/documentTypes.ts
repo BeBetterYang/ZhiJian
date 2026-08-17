@@ -1,6 +1,7 @@
 export type NodeId = string;
 
-export type ZhiJianBlockType = 'text' | 'heading1' | 'heading2' | 'heading3';
+export type ZhiJianContentBlockType = 'text' | 'heading1' | 'heading2' | 'heading3';
+export type ZhiJianBlockType = 'root' | ZhiJianContentBlockType;
 
 export interface ZhiJianTodo {
   enabled: boolean;
@@ -62,7 +63,7 @@ export interface CreateDocumentOptions {
 export interface CreateNodeInput {
   id?: NodeId;
   content?: string;
-  blockType?: ZhiJianBlockType;
+  blockType?: ZhiJianContentBlockType;
   todo?: ZhiJianTodo;
   note?: string;
   images?: ZhiJianImage[];
@@ -98,7 +99,7 @@ export function createDocument(options: CreateDocumentOptions = {}): ZhiJianDocu
         parentId: null,
         children: [],
         content: title,
-        blockType: 'heading2',
+        blockType: 'root',
       },
     },
     createdAt: now,

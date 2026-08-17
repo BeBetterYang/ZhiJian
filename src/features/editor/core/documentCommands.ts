@@ -1,7 +1,7 @@
 import type {
   CreateNodeInput,
   NodeId,
-  ZhiJianBlockType,
+  ZhiJianContentBlockType,
   ZhiJianImage,
   ZhiJianNodeStyle,
   ZhiJianTable,
@@ -13,7 +13,7 @@ export type DocumentCommand =
   | { type: 'deleteNode'; nodeId: NodeId }
   | { type: 'moveNode'; nodeId: NodeId; parentId: NodeId; index: number }
   | { type: 'updateContent'; nodeId: NodeId; content: string; mergeKey?: string }
-  | { type: 'setBlockType'; nodeId: NodeId; blockType: ZhiJianBlockType }
+  | { type: 'setBlockType'; nodeId: NodeId; blockType: ZhiJianContentBlockType }
   | { type: 'setTodo'; nodeId: NodeId; todo?: ZhiJianTodo }
   | { type: 'toggleTodo'; nodeId: NodeId }
   | { type: 'setTodoChecked'; nodeId: NodeId; checked: boolean }
@@ -39,7 +39,7 @@ export const documentCommands = {
     content: string,
     options: { mergeKey?: string } = {},
   ): DocumentCommand => ({ type: 'updateContent', nodeId, content, mergeKey: options.mergeKey }),
-  setBlockType: (nodeId: NodeId, blockType: ZhiJianBlockType): DocumentCommand => ({
+  setBlockType: (nodeId: NodeId, blockType: ZhiJianContentBlockType): DocumentCommand => ({
     type: 'setBlockType',
     nodeId,
     blockType,
