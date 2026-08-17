@@ -1,0 +1,24 @@
+node_modules
+dist
+.vite
+*.local
+*.log
+*.tsbuildinfo
+server-data
+
+.env
+.env.*
+!.env.example
+
+.vercel
+
+# 工具/临时目录
+.codex-tmp
+.workbuddy
+.mcp.json
+
+# 开发调试截图
+qa-*.png
+outline-*.png
+mubu-reference.png
+design-qa.md
