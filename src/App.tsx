@@ -44,6 +44,12 @@ import {
   deleteServerMap, loadServerJson, loginAccount, logoutAccount, registerAccount, saveServerJson,
   updateAccountPassword, updateAccountProfile,
 } from './serverStorage';
+import type { ZhiJianDocument } from './features/editor/core';
+import {
+  getLocalDocumentStorageKey,
+  loadLocalDocument,
+  parsePersistedDocument,
+} from './features/editor/persistence';
 
 const MindMapEditor = lazy(() => import('./MindMapEditor'));
 
@@ -390,7 +396,6 @@ type LibraryFolder = { id: string; title: string; parentId?: string | null };
 type LibraryMap = { id: string; title: string; folderId: string; time: string; starred?: boolean; defaultViewMode?: 'mindmap' | 'outline' };
 type LibraryData = { folders: LibraryFolder[]; maps: LibraryMap[] };
 type RenameTarget = { kind: 'folder' | 'map'; id: string; title: string };
-type SearchNode = { data?: Record<string, unknown>; children?: SearchNode[] };
 type MapSearchHit = { path: string; text: string; nodeText: string };
 type MapSearchResult = { kind: 'map'; mapId: string; title: string; folderId: string; hits: MapSearchHit[] };
 type FolderSearchResult = { kind: 'folder'; folderId: string; title: string };
@@ -480,18 +485,19 @@ function getSearchExcerpt(text: string, query: string) {
   return `${start > 0 ? '...' : ''}${text.slice(start, end)}${end < text.length ? '...' : ''}`;
 }
 
-function collectMapSearchHits(node: SearchNode, query: string, paths: string[] = [], hits: MapSearchHit[] = []) {
-  const data = node.data ?? {};
-  const textParts = [data.text, data.note, data._annotation];
-  const table = data._table as { cells?: unknown[][] } | undefined;
-  table?.cells?.forEach((row) => row.forEach((cell) => textParts.push(cell)));
+function collectDocumentSearchHits(document: ZhiJianDocument, query: string, nodeId = document.rootId, paths: string[] = [], hits: MapSearchHit[] = []) {
+  const node = document.nodes[nodeId];
+  if (!node) return hits;
+  const textParts: unknown[] = [node.content, node.note];
+  node.table?.rows.forEach((row) => row.forEach((cell) => textParts.push(cell)));
   const text = textParts.map(getSearchText).filter(Boolean).join(' ');
-  if (text.toLocaleLowerCase().includes(query.toLocaleLowerCase())) {
-    hits.push({ path: paths.join(' > '), text: getSearchExcerpt(text, query), nodeText: getSearchText(data.text) });
+  const nodeText = getSearchText(node.content);
+  if (nodeId !== document.rootId && text.toLocaleLowerCase().includes(query.toLocaleLowerCase())) {
+    hits.push({ path: paths.join(' > '), text: getSearchExcerpt(text, query), nodeText });
   }
-  (node.children ?? []).forEach((child, index) => {
-    const childTitle = getSearchText(child.data?.text) || `Node ${index + 1}`;
-    collectMapSearchHits(child, query, [...paths, childTitle], hits);
+  node.children.forEach((childId) => {
+    const child = document.nodes[childId];
+    collectDocumentSearchHits(document, query, childId, [...paths, getSearchText(child?.content) || childId], hits);
   });
   return hits;
 }
@@ -646,14 +652,17 @@ function WorkspacePage() {
       void Promise.all(library.maps
         .filter((map) => searchFolderIds.length === 0 || searchFolderIds.includes(map.folderId))
         .map(async (map) => {
-          let content: SearchNode | null = null;
+          let content: ZhiJianDocument | null = null;
           try {
-            const stored = JSON.parse(localStorage.getItem(`zhijian-map-${map.id}`) ?? 'null') as SearchNode | null;
-            content = stored ?? await loadServerJson<SearchNode>(`/api/maps/${encodeURIComponent(map.id)}`);
+            const stored = loadLocalDocument(map.id);
+            const serverValue = stored ? null : await loadServerJson<unknown>(`/api/maps/${encodeURIComponent(map.id)}`);
+            content = stored ?? parsePersistedDocument(serverValue);
           } catch {
-            content = await loadServerJson<SearchNode>(`/api/maps/${encodeURIComponent(map.id)}`).catch(() => null);
+            content = await loadServerJson<unknown>(`/api/maps/${encodeURIComponent(map.id)}`)
+              .then(parsePersistedDocument)
+              .catch(() => null);
           }
-          const hits = content ? collectMapSearchHits(content, query) : [];
+          const hits = content ? collectDocumentSearchHits(content, query) : [];
           if (map.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())) {
             hits.unshift({ path: '文件标题', text: `标题匹配：${map.title}`, nodeText: map.title });
           }
@@ -837,10 +846,10 @@ function WorkspacePage() {
       starred: false,
     };
     const source = await loadServerJson<unknown>(`/api/maps/${encodeURIComponent(map.id)}`);
-    const localSource = localStorage.getItem(`zhijian-map-${map.id}`);
+    const localSource = localStorage.getItem(getLocalDocumentStorageKey(map.id));
     const copySource = source ?? (localSource ? JSON.parse(localSource) as unknown : null);
     if (copySource) await saveServerJson(`/api/maps/${encodeURIComponent(copy.id)}`, copySource).catch(() => undefined);
-    if (localSource) localStorage.setItem(`zhijian-map-${copy.id}`, localSource);
+    if (localSource) localStorage.setItem(getLocalDocumentStorageKey(copy.id), localSource);
     setLibrary((current) => ({ ...current, maps: [copy, ...current.maps] }));
     Message.success('导图已复制');
   };
@@ -853,7 +862,7 @@ function WorkspacePage() {
     cancelText: '取消',
     onOk: () => {
       setLibrary((current) => ({ ...current, maps: current.maps.filter((item) => item.id !== map.id) }));
-      localStorage.removeItem(`zhijian-map-${map.id}`);
+      localStorage.removeItem(getLocalDocumentStorageKey(map.id));
       void deleteServerMap(map.id).catch(() => Message.warning('服务器文件删除失败，已删除本地记录'));
       if (mapId === map.id) navigate('/workspace');
       Message.success('导图已删除');
@@ -886,7 +895,7 @@ function WorkspacePage() {
           folders: current.folders.filter((item) => !folderIds.has(item.id)),
           maps: current.maps.filter((item) => !folderIds.has(item.folderId)),
         }));
-        maps.forEach((map) => localStorage.removeItem(`zhijian-map-${map.id}`));
+        maps.forEach((map) => localStorage.removeItem(getLocalDocumentStorageKey(map.id)));
         await Promise.all(maps.map((map) => deleteServerMap(map.id).catch(() => undefined)));
         if (mapId && maps.some((map) => map.id === mapId)) navigate('/workspace');
         Message.success('文件夹已删除');

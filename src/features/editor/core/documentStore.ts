@@ -15,6 +15,12 @@ export interface ExecuteCommandOptions extends PushHistoryOptions {
   recordHistory?: boolean;
 }
 
+export interface ReplaceDocumentOptions extends PushHistoryOptions {
+  recordHistory?: boolean;
+  dirty?: boolean;
+  resetHistory?: boolean;
+}
+
 type DeepReadonly<T> = T extends (...args: never[]) => unknown
   ? T
   : T extends readonly (infer U)[]
@@ -84,6 +90,29 @@ export class DocumentStore {
         before,
         after,
         command: { type: 'transaction', commands },
+        mergeKey: options.mergeKey,
+      }, options);
+    }
+
+    this.#refreshSnapshot();
+    this.#emit();
+    return this.#document;
+  }
+
+  replaceDocument(document: ZhiJianDocument, options: ReplaceDocumentOptions = {}): ZhiJianDocument {
+    assertValidDocument(document);
+    const before = this.#document;
+    const after = cloneDocument(document);
+    this.#document = after;
+    this.#dirty = options.dirty ?? true;
+
+    if (options.resetHistory) {
+      this.#history = createHistoryState();
+    } else if (options.recordHistory !== false) {
+      this.#history = pushHistory(this.#history, {
+        before,
+        after,
+        command: { type: 'transaction', commands: [] },
         mergeKey: options.mergeKey,
       }, options);
     }

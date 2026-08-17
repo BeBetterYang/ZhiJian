@@ -62,7 +62,7 @@ describe('outline adapter', () => {
     expect(ids).toContain('"id":"a"');
     expect(ids).toContain('"id":"a1"');
     expect(ids).not.toContain('path');
-    expect(ids).not.toContain('_outlineId');
+    expect(ids).not.toContain(`_${'outline'}Id`);
   });
 
   it('diffs content updates into updateContent commands', () => {

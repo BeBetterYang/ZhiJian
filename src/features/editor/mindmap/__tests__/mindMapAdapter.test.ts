@@ -64,6 +64,25 @@ describe('documentToMindMapData', () => {
     expect(a?.data._table).toEqual({ rows: 2, columns: 2, cells: [['1', '2'], ['3', '4']] });
     expect(a?.data.color).toBe('#165DFF');
     expect(a?.data.fillColor).toBe('#E8F3FF');
+    expect(a?.data.fontSize).toBe(19);
+    expect(a?.data.fontWeight).toBe('600');
     expect(a?.children).toHaveLength(2);
+  });
+
+  it('keeps cloze ranges and maps typography without changing tree depth', () => {
+    let document = createFixtureDocument();
+    document = reduceDocument(document, documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'a1',
+      node: { id: 'deep-heading', content: 'Deep', blockType: 'heading1', clozes: [{ start: 0, end: 4 }] },
+    }));
+
+    const data = documentToMindMapData(document);
+    const deep = data.children?.[0].children?.[0].children?.[0];
+
+    expect(deep?.data.uid).toBe('deep-heading');
+    expect(deep?.data._blockType).toBe('heading1');
+    expect(deep?.data.fontSize).toBe(19);
+    expect(deep?.data._clozes).toEqual([{ start: 0, end: 4 }]);
   });
 });

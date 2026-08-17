@@ -45,6 +45,7 @@ export interface ZhiJianNode {
 }
 
 export interface ZhiJianDocument {
+  schemaVersion: 1;
   id: string;
   title: string;
   rootId: NodeId;
@@ -90,6 +91,7 @@ export function createDocument(options: CreateDocumentOptions = {}): ZhiJianDocu
   const title = options.title ?? DEFAULT_DOCUMENT_TITLE;
 
   return {
+    schemaVersion: 1,
     id,
     title,
     rootId,

@@ -78,6 +78,14 @@ export function nodeStyleToMindMapData(style?: Readonly<ZhiJianNodeStyle>): Pick
   };
 }
 
+function blockTypeToMindMapTypography(blockType: ZhiJianBlockType): Pick<MindMapViewNodeData, 'fontSize' | 'fontWeight'> {
+  if (blockType === 'root') return { fontSize: 20, fontWeight: '500' };
+  if (blockType === 'heading1') return { fontSize: 19, fontWeight: '600' };
+  if (blockType === 'heading2') return { fontSize: 18, fontWeight: '500' };
+  if (blockType === 'heading3') return { fontSize: 17, fontWeight: '500' };
+  return { fontSize: 16 };
+}
+
 export function mindMapDataToStyle(data: MindMapViewNodeData): ZhiJianNodeStyle | undefined {
   const style: ZhiJianNodeStyle = {};
   if (typeof data.color === 'string' && data.color) style.color = data.color;
@@ -134,6 +142,7 @@ export function zhiJianNodeToMindMapNode(
     _table: tableToMindMapTable(node.table),
     _clozes: node.clozes,
     expand: undefined,
+    ...blockTypeToMindMapTypography(node.blockType),
     ...todoToMindMapData(node.todo),
     ...nodeStyleToMindMapData(node.style),
   } as MindMapViewNodeData;

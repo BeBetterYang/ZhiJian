@@ -37,6 +37,8 @@ export interface MindMapViewNodeData {
   _table?: MindMapViewTable;
   color?: string;
   fillColor?: string;
+  fontSize?: number;
+  fontWeight?: string;
   _clozes?: ZhiJianNode['clozes'];
   expand?: boolean;
 }
@@ -44,7 +46,10 @@ export interface MindMapViewNodeData {
 export interface MindMapViewNode {
   data: MindMapViewNodeData;
   children?: MindMapViewNode[];
+  smmVersion?: string;
 }
+
+export type SimpleMindMapRendererNode = MindMapViewNode;
 
 interface ReadonlyZhiJianTable {
   readonly rows: readonly (readonly string[])[];
@@ -60,6 +65,7 @@ export interface ReadonlyZhiJianNode extends Omit<Readonly<ZhiJianNode>, 'childr
 }
 
 export interface ReadonlyZhiJianDocument {
+  readonly schemaVersion: 1;
   readonly id: string;
   readonly title: string;
   readonly rootId: NodeId;

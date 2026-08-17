@@ -94,7 +94,7 @@ export function diffMindMapChangeToCommands(
 
   nextFlat.forEach((nextNode, nodeId) => {
     const resolvedNodeId = replaceId(nodeId, idReplacements) ?? nodeId;
-    if (!knownIds.has(nodeId) || deletedIds.has(nodeId) || resolvedNodeId === document.rootId) return;
+    if (!knownIds.has(nodeId) || deletedIds.has(nodeId)) return;
     const currentNode = document.nodes[resolvedNodeId];
     if (!currentNode) return;
 
@@ -105,9 +105,15 @@ export function diffMindMapChangeToCommands(
       }));
     }
 
-    if (isContentBlockType(nextNode.data._blockType) && currentNode.blockType !== nextNode.data._blockType) {
+    if (
+      resolvedNodeId !== document.rootId
+      && isContentBlockType(nextNode.data._blockType)
+      && currentNode.blockType !== nextNode.data._blockType
+    ) {
       commands.push(documentCommands.setBlockType(resolvedNodeId, nextNode.data._blockType));
     }
+
+    if (resolvedNodeId === document.rootId) return;
 
     const nextTodo = mindMapDataToTodo(nextNode.data);
     if (!valuesEqual(currentNode.todo, nextTodo)) {

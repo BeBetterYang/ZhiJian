@@ -49,7 +49,6 @@ import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js';
 import NodeImgAdjust from 'simple-mind-map/src/plugins/NodeImgAdjust.js';
 import RichText from 'simple-mind-map/src/plugins/RichText.js';
 import OutlineEditor from './OutlineEditor';
-import type { LegacyMindMapNode as OutlineNode } from './legacyMindMapTypes';
 import {
   createDocument,
   createDocumentStore,
@@ -60,6 +59,7 @@ import {
   applyMindMapDataChange,
   documentToMindMapData,
   MindMapView,
+  type SimpleMindMapRendererNode,
   type MindMapViewNode,
 } from './features/editor/mindmap';
 import SharedEditorToolbar from './SharedEditorToolbar';
@@ -70,9 +70,14 @@ import { applyInlineColor } from './richTextSelection';
 import { uploadServerImage } from './serverStorage';
 import {
   normalizeMarkdownBoldHtml,
-  parseMindMapMarkdown,
-  serializeMindMapMarkdown,
-} from './mindMapMarkdown';
+  parseMarkdown as parseZhiJianMarkdown,
+  serializeMarkdown as serializeZhiJianMarkdown,
+} from './features/editor/markdown';
+import {
+  loadLocalDocument,
+  loadServerDocument,
+  useDocumentPersistence,
+} from './features/editor/persistence';
 
 const pluginRegistrar = MindMap.usePlugin;
 pluginRegistrar(Drag);
@@ -452,7 +457,7 @@ function getThemeConfig(
   };
 }
 
-function readMapPreferences(data: OutlineNode) {
+function readMapPreferences(data: SimpleMindMapRendererNode) {
   const defaults = readDefaultMapPreferences();
   const storedLayout = String(data.data._layout || defaults.layout);
   const storedTheme = String(data.data._theme || defaults.theme);
@@ -471,7 +476,7 @@ function readMapPreferences(data: OutlineNode) {
   };
 }
 
-function applyCurveRootLineOverride(data: OutlineNode, lineStyle: ConnectionLineStyleKey) {
+function applyCurveRootLineOverride(data: SimpleMindMapRendererNode, lineStyle: ConnectionLineStyleKey) {
   const selectedStyle = connectionLineStyles.find((item) => item.value === lineStyle) ?? connectionLineStyles[1];
   data.data.lineStyle = lineStyle === 'curve' ? 'straight' : selectedStyle.lineStyle;
   return data;
@@ -1019,6 +1024,8 @@ function createTodoPrefixContent(node: MindMapNode) {
 }
 
 function createEditorDocumentStore(mapId: string, title: string): DocumentStore {
+  const storedDocument = loadLocalDocument(mapId);
+  if (storedDocument) return createDocumentStore(storedDocument);
   const document = createDocument({
     id: mapId,
     title: title || '未命名',
@@ -1031,6 +1038,7 @@ function createEditorDocumentStore(mapId: string, title: string): DocumentStore 
       content: '',
     },
   }), { recordHistory: false });
+  store.markSaved();
   return store;
 }
 
@@ -1077,8 +1085,8 @@ function getZhiJianNodeId(node: MindMapNode | null | undefined) {
   return typeof value === 'string' ? value : '';
 }
 
-function exportMarkdown(data: OutlineNode, name: string) {
-  const blob = new Blob([serializeMindMapMarkdown(data)], { type: 'text/markdown;charset=utf-8' });
+function downloadMarkdown(content: string, name: string) {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -1126,9 +1134,26 @@ export default function MindMapEditor({
   const customTextSelectionRef = useRef<CustomNodeTextSelection | null>(null);
   const onTitleChangeRef = useRef(onTitleChange);
 
+  useDocumentPersistence({ store: documentStore, documentId: mapId });
+
   useEffect(() => {
     onTitleChangeRef.current = onTitleChange;
   }, [onTitleChange]);
+
+  useEffect(() => {
+    let disposed = false;
+    void loadServerDocument(mapId).then((serverDocument) => {
+      if (disposed || !serverDocument) return;
+      documentStore.replaceDocument(serverDocument, {
+        resetHistory: true,
+        dirty: false,
+        recordHistory: false,
+      });
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [documentStore, mapId]);
 
   useEffect(() => {
     let previousTitle = documentStore.getDocument().title;
@@ -1155,7 +1180,7 @@ export default function MindMapEditor({
     [backgroundColor, connectionLineStyle, nodeBorderShape, showNodeBorder, theme],
   );
   const transformMindMapStoreData = useCallback((data: MindMapViewNode): MindMapViewNode => {
-    return applyCurveRootLineOverride(data as OutlineNode, connectionLineStyle) as MindMapViewNode;
+    return applyCurveRootLineOverride(data as SimpleMindMapRendererNode, connectionLineStyle) as MindMapViewNode;
   }, [connectionLineStyle]);
 
   useEffect(() => {
@@ -1301,7 +1326,7 @@ export default function MindMapEditor({
       // TODO Phase 6: persist ZhiJianDocument from DocumentStore instead of
       // using SimpleMindMap data_change as a save source.
       if (!data || typeof data !== 'object' || !('data' in data)) return;
-      const nextData = data as OutlineNode;
+      const nextData = data as SimpleMindMapRendererNode;
       applyMindMapDataChange({
         store: documentStore,
         previousDataRef: previousMindMapDataRef,
@@ -1457,11 +1482,12 @@ export default function MindMapEditor({
   }, [documentStore, initialMindMapData, mapId]);
 
   useEffect(() => {
-    const instance = mindMapRef.current;
-    const root = (instance as (MindMap & { renderer?: { root?: MindMapNode } }) | null)?.renderer?.root;
-    if (!instance || !root || !title || getPlainTitle(root.getData('text')) === title) return;
-    instance.execCommand('SET_NODE_DATA', root, { text: title, richText: false });
-  }, [title]);
+    const currentTitle = documentStore.getSnapshot().document.nodes[documentStore.getSnapshot().document.rootId]?.content;
+    if (!title || currentTitle === title) return;
+    documentStore.execute(documentCommands.updateContent(documentStore.getSnapshot().document.rootId, title, {
+      mergeKey: `external-title:${documentStore.getSnapshot().document.rootId}`,
+    }), { recordHistory: false });
+  }, [documentStore, title]);
 
   useEffect(() => {
     if (!focusNodeText || !mapReady) return;
@@ -1520,6 +1546,21 @@ export default function MindMapEditor({
       return;
     }
     activeNodes.forEach((node) => instance.execCommand('SET_NODE_STYLE', node, prop, value));
+  };
+
+  const setNodeCoreStyle = (kind: 'color' | 'backgroundColor', value: string) => {
+    const commands = activeNodes
+      .map((node) => getZhiJianNodeId(node))
+      .filter((nodeId) => Boolean(nodeId))
+      .map((nodeId) => {
+        const current = documentStore.getSnapshot().document.nodes[nodeId]?.style ?? {};
+        return documentCommands.setStyle(nodeId, { ...current, [kind]: value });
+      });
+    if (commands.length === 0) {
+      Message.info('请先选择一个节点');
+      return;
+    }
+    documentStore.executeTransaction(commands);
   };
 
   const saveMapPreference = (key: '_layout' | '_theme' | '_backgroundColor' | '_showNodeBorder' | '_nodeBorderShape' | '_lineStyle', value: string | boolean) => {
@@ -1660,7 +1701,7 @@ export default function MindMapEditor({
       setRichTextFormat((current) => ({ ...current, [kind]: value }));
       return;
     }
-    setNodeStyle(kind === 'color' ? 'color' : 'fillColor', value);
+    setNodeCoreStyle(kind === 'color' ? 'color' : 'backgroundColor', value);
   };
 
   const insertTable = () => {
@@ -1726,12 +1767,8 @@ export default function MindMapEditor({
       try {
         const content = String(reader.result || '');
         if (/\.md$/i.test(file.name)) {
-          applyMindMapDataChange({
-            store: documentStore,
-            previousDataRef: previousMindMapDataRef,
-            isApplyingStoreUpdateRef: isApplyingMindMapStoreUpdateRef,
-            nextData: parseMindMapMarkdown(content),
-          });
+          const document = parseZhiJianMarkdown(content, { documentId: mapId, now: Date.now() });
+          documentStore.replaceDocument(document, { recordHistory: true, dirty: true });
         } else {
           const parsed: unknown = JSON.parse(content);
           if (typeof parsed === 'object' && parsed !== null && 'root' in parsed) {
@@ -1763,7 +1800,7 @@ export default function MindMapEditor({
       window.requestAnimationFrame(() => {
         instance.render();
         window.requestAnimationFrame(() => {
-          if (type === 'md') exportMarkdown(instance.getData() as OutlineNode, title);
+          if (type === 'md') downloadMarkdown(serializeZhiJianMarkdown(documentStore.getDocument()), title);
           else void instance.export(type, true, title);
         });
       });
@@ -1826,7 +1863,7 @@ export default function MindMapEditor({
     const instance = mindMapRef.current;
     if (!instance || !activeNode || activeNode.isRoot) return;
     const duplicate = (activeNode as MindMapNode & {
-      getPureData: (removeActive?: boolean, removeId?: boolean) => OutlineNode;
+      getPureData: (removeActive?: boolean, removeId?: boolean) => SimpleMindMapRendererNode;
     }).getPureData(true, true);
     instance.execCommand('INSERT_MULTI_NODE', [activeNode], [duplicate]);
   };
@@ -1844,7 +1881,7 @@ export default function MindMapEditor({
     const parent = (activeNode as MindMapNode & { parent?: { children?: MindMapNode[] } | null }).parent;
     const siblings = parent?.children ?? [activeNode];
     const expandable = siblings.filter((node) => {
-      const data = node as MindMapNode & { nodeData: { children?: OutlineNode[] } };
+      const data = node as MindMapNode & { nodeData: { children?: SimpleMindMapRendererNode[] } };
       return (data.nodeData.children?.length ?? 0) > 0;
     });
     const shouldExpand = expandable.some((node) => node.getData('expand') === false);
@@ -1969,7 +2006,7 @@ export default function MindMapEditor({
         void (instance.renderer as ClipboardRenderer).paste();
         break;
       case 'duplicate': {
-        const duplicate = (node as MindMapNode & { getPureData: (removeActive?: boolean, removeId?: boolean) => OutlineNode }).getPureData(true, true);
+        const duplicate = (node as MindMapNode & { getPureData: (removeActive?: boolean, removeId?: boolean) => SimpleMindMapRendererNode }).getPureData(true, true);
         instance.execCommand('INSERT_MULTI_NODE', [node], [duplicate]);
         break;
       }
@@ -1977,8 +2014,10 @@ export default function MindMapEditor({
         openDescriptionForNode(node);
         break;
       case 'remove-description':
-        instance.execCommand('SET_NODE_NOTE', node, '');
-        instance.render();
+        {
+          const nodeId = getZhiJianNodeId(node);
+          if (nodeId) documentStore.execute(documentCommands.setNote(nodeId, undefined));
+        }
         Message.success('节点描述已删除');
         break;
       case 'remove-current':
@@ -1990,11 +2029,11 @@ export default function MindMapEditor({
       case 'toggle-siblings': {
         const contextNode = node as MindMapNode & {
           parent?: { children?: MindMapNode[] } | null;
-          nodeData: { children?: OutlineNode[] };
+          nodeData: { children?: SimpleMindMapRendererNode[] };
         };
         const siblings = contextNode.parent?.children ?? [node];
         const expandableSiblings = siblings.filter((item) => {
-          const current = item as MindMapNode & { nodeData: { children?: OutlineNode[] } };
+          const current = item as MindMapNode & { nodeData: { children?: SimpleMindMapRendererNode[] } };
           return (current.nodeData.children?.length ?? 0) > 0;
         });
         const shouldExpand = expandableSiblings.some((item) => item.getData('expand') === false);
@@ -2343,8 +2382,8 @@ export default function MindMapEditor({
         <Space><Button onClick={() => setDescriptionOpen(false)}>取消</Button><Button type="primary" onClick={() => {
           const instance = mindMapRef.current;
           if (!instance || !descriptionNode) return;
-          instance.execCommand('SET_NODE_NOTE', descriptionNode, description);
-          instance.render();
+          const nodeId = getZhiJianNodeId(descriptionNode);
+          if (nodeId) documentStore.execute(documentCommands.setNote(nodeId, description));
           setDescriptionOpen(false);
           Message.success('节点描述已保存');
         }}>保存</Button></Space>

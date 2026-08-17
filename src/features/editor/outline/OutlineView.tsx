@@ -44,6 +44,15 @@ function renderNodeContent(document: ZhiJianDocument, text: string, item: { id: 
   if (!node) return renderInlineMarkdown(text);
   const classes = ['zj-outline-topic', `zj-outline-${node.blockType}`];
   if (node.todo?.checked) classes.push('is-done');
+  const style = [
+    node.style?.color ? `color:${escapeHtml(node.style.color)}` : '',
+    node.style?.backgroundColor ? `background-color:${escapeHtml(node.style.backgroundColor)}` : '',
+  ].filter(Boolean).join(';');
+  const content = node.clozes?.length
+    ? node.content.split('').map((character, index) => (
+      node.clozes?.some((range) => index >= range.start && index < range.end) ? '_' : character
+    )).join('')
+    : text;
   const todo = node.todo?.enabled
     ? `<input class="zj-outline-todo" data-zj-outline-todo="${node.id}" type="checkbox"${node.todo.checked ? ' checked' : ''} />`
     : '';
@@ -53,7 +62,7 @@ function renderNodeContent(document: ZhiJianDocument, text: string, item: { id: 
     : '';
   const table = node.table ? renderTable(node.table.rows) : '';
 
-  return `<span class="${classes.join(' ')}">${todo}<span class="zj-outline-content">${renderInlineMarkdown(text || '')}</span></span>${note}${images}${table}`;
+  return `<span class="${classes.join(' ')}"${style ? ` style="${style}"` : ''}>${todo}<span class="zj-outline-content">${renderInlineMarkdown(content || '')}</span></span>${note}${images}${table}`;
 }
 
 function getEditableElement(event: KeyboardEvent) {

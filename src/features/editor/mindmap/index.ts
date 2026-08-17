@@ -12,4 +12,5 @@ export type {
   MindMapViewNode,
   MindMapViewNodeData,
   MindMapViewState,
+  SimpleMindMapRendererNode,
 } from './mindMapTypes';

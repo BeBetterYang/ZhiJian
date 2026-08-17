@@ -103,6 +103,29 @@ describe('diffMindMapChangeToCommands', () => {
     ]);
   });
 
+  it('syncs mind map root content into the document root without changing root block type', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    const previousDataRef = { current: documentToMindMapData(store.getSnapshot().document) };
+    const isApplyingStoreUpdateRef = { current: false };
+
+    applyMindMapDataChange({
+      store,
+      previousDataRef,
+      isApplyingStoreUpdateRef,
+      nextData: {
+        data: { uid: 'root', id: 'root', text: '产品规划', richText: false, _blockType: 'heading1' },
+        children: [],
+      },
+    });
+
+    expect(store.getSnapshot().document.nodes.root.content).toBe('产品规划');
+    expect(store.getSnapshot().document.nodes.root.blockType).toBe('root');
+    expect(store.undo()).toBe(true);
+    expect(store.getSnapshot().document.nodes.root.content).toBe('新手入门');
+    expect(store.redo()).toBe(true);
+    expect(store.getSnapshot().document.nodes.root.content).toBe('产品规划');
+  });
+
   it('detects todo, note, image, table and style writes', () => {
     const document = createABC();
     const previous = documentToMindMapData(document);
