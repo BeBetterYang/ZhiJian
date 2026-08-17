@@ -1,10 +1,10 @@
-import type { OutlineNode } from './OutlineEditor';
+import type { LegacyMindMapNode } from './legacyMindMapTypes';
 
 type TableData = { rows: number; columns: number; cells: string[][] };
 type ImageData = { url: string; title?: string };
 const RICH_TEXT_DATA_VERSION = '0.14.0';
 
-const makeNode = (text: string): OutlineNode => ({
+const makeNode = (text: string): LegacyMindMapNode => ({
   data: { text: markdownInlineToHtml(text), richText: /[*_<]/.test(text), expand: true },
   children: [],
 });
@@ -47,8 +47,8 @@ export function normalizeMarkdownBoldHtml(value: string) {
   return container.innerHTML;
 }
 
-export function normalizeMindMapMarkdownFormatting(root: OutlineNode) {
-  const visit = (node: OutlineNode) => {
+export function normalizeMindMapMarkdownFormatting(root: LegacyMindMapNode) {
+  const visit = (node: LegacyMindMapNode) => {
     const text = String(node.data.text ?? '');
     const formattedText = normalizeMarkdownBoldHtml(text);
     if (formattedText !== text) {
@@ -111,25 +111,25 @@ function splitTableRow(line: string) {
 
 const isTableSeparator = (cells: string[]) => cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 
-function appendAnnotation(node: OutlineNode, lines: string[]) {
+function appendAnnotation(node: LegacyMindMapNode, lines: string[]) {
   const html = lines.map((line) => markdownInlineToHtml(line)).join('<br>');
   const existing = String(node.data._annotation ?? '');
   node.data._annotationEnabled = true;
   node.data._annotation = existing ? `${existing}<br>${html}` : html;
 }
 
-function appendImage(node: OutlineNode, alt: string, url: string) {
+function appendImage(node: LegacyMindMapNode, alt: string, url: string) {
   const images = Array.isArray(node.data._images) ? node.data._images as ImageData[] : [];
   node.data._images = [...images, { url, title: alt }];
 }
 
-export function parseMindMapMarkdown(markdown: string): OutlineNode {
+export function parseMindMapMarkdown(markdown: string): LegacyMindMapNode {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
-  let root: OutlineNode = makeNode('未命名');
+  let root: LegacyMindMapNode = makeNode('未命名');
   let rootAssigned = false;
-  let currentSection: OutlineNode | null = null;
+  let currentSection: LegacyMindMapNode | null = null;
   let lastNode = root;
-  const stack: Array<{ level: number; node: OutlineNode }> = [];
+  const stack: Array<{ level: number; node: LegacyMindMapNode }> = [];
 
   for (let index = 0; index < lines.length; index += 1) {
     const raw = lines[index];
@@ -219,7 +219,7 @@ export function parseMindMapMarkdown(markdown: string): OutlineNode {
 
 const escapeCell = (value: string) => value.replaceAll('|', '\\|').replaceAll('\n', '<br>');
 
-function appendNodeAttachments(lines: string[], node: OutlineNode, indent: string) {
+function appendNodeAttachments(lines: string[], node: LegacyMindMapNode, indent: string) {
   const annotation = htmlToMarkdownInline(node.data._annotation);
   if (node.data._annotationEnabled && annotation) {
     annotation.split('\n').forEach((line) => lines.push(`${indent}> ${line}`));
@@ -245,11 +245,11 @@ function appendNodeAttachments(lines: string[], node: OutlineNode, indent: strin
   });
 }
 
-export function serializeMindMapMarkdown(root: OutlineNode) {
+export function serializeMindMapMarkdown(root: LegacyMindMapNode) {
   const lines = [`# ${htmlToMarkdownInline(root.data.text) || '未命名'}`, ''];
   appendNodeAttachments(lines, root, '');
 
-  const walkList = (node: OutlineNode, depth: number) => {
+  const walkList = (node: LegacyMindMapNode, depth: number) => {
     const indent = '  '.repeat(depth);
     lines.push(`${indent}- ${htmlToMarkdownInline(node.data.text)}`);
     appendNodeAttachments(lines, node, `${indent}  `);
