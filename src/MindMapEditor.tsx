@@ -215,6 +215,15 @@ type TextEditableRenderer = MindMap['renderer'] & {
   };
 };
 
+// 编辑期间局部更新节点框尺寸用到的 SimpleMindMap 节点 API
+type ResizableMindMapNode = MindMapNode & {
+  getSize(recreateTypes?: string[] | null, opt?: Record<string, unknown>): boolean;
+  reRender(recreateTypes?: string[] | null, opt?: Record<string, unknown>): boolean;
+  customNodeContentRealtimeLayout?: () => void;
+  width: number;
+  height: number;
+};
+
 type CustomNodeTextSelection = {
   node: MindMapNode;
   element: HTMLElement;
@@ -675,6 +684,43 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
     selection?.removeAllRanges();
     selection?.addRange(range);
   }, [floatingTitleEditor]);
+
+  // 编辑期间实时自适应节点框尺寸：只更新当前节点的 SVG shape / foreignObject，
+  // 不触发 mindMap.render()（全树 layout）。其他节点保持原位，编辑结束统一重排
+  useEffect(() => {
+    if (!floatingTitleEditor) return;
+    const editorEl = floatingTitleRef.current;
+    const titleEl = titleTextRef.current;
+    const attachmentEl = attachmentRef.current;
+    if (!editorEl || !titleEl) return;
+
+    let rafId = 0;
+    const syncNodeBox = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        // 把浮动编辑器内容回写到原 span（与 finishTitleEdit 一致地 normalize），
+        // 让 getSize 测量最新内容，避免编辑结束尺寸跳变
+        titleEl.innerHTML = normalizeMarkdownBoldHtml(editorEl.innerHTML);
+        // 清除 syncAttachmentSize 设置的固定 inline width，让 max-content 生效
+        if (attachmentEl) attachmentEl.style.width = '';
+        const resizable = node as unknown as ResizableMindMapNode;
+        if (typeof resizable.getSize !== 'function') return;
+        const sizeChanged = resizable.getSize([]);
+        if (sizeChanged && typeof resizable.customNodeContentRealtimeLayout === 'function') {
+          resizable.customNodeContentRealtimeLayout();
+        }
+      });
+    };
+
+    const observer = new ResizeObserver(syncNodeBox);
+    observer.observe(editorEl);
+    syncNodeBox();
+    return () => {
+      observer.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [floatingTitleEditor, node]);
 
   const updateTable = (nextTable: EditableTableData) => {
     const formattedTable = {
@@ -1260,8 +1306,12 @@ export default function MindMapEditor({
       const change = args[0] as { node?: MindMapNode; text?: string } | undefined;
       if (!change?.node || typeof change.text !== 'string') return;
       const formattedText = normalizeMarkdownBoldHtml(change.text);
-      if (formattedText !== change.text) {
-        change.node.mindMap.execCommand('SET_NODE_DATA', change.node, { text: formattedText, richText: true });
+      // 编辑期间把文本写回 nodeData，让 getSize 测量最新内容
+      change.node.mindMap.execCommand('SET_NODE_DATA', change.node, { text: formattedText, richText: true });
+      // 只重测当前节点尺寸 + 重建当前节点 group，不触发全树 layout
+      const resizable = change.node as unknown as ResizableMindMapNode;
+      if (typeof resizable.reRender === 'function') {
+        resizable.reRender([]);
       }
     };
     const handleCustomTextSelection = (...args: unknown[]) => {
