@@ -648,8 +648,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .mind-map-node-description-button.arco-btn { width: 22px; min-width: 22px; height: 22px; padding: 0; flex: 0 0 22px; color: rgb(var(--gray-6)); }
 .mind-map-node-description-button.arco-btn:hover { color: rgb(var(--primary-6)); }
 .mind-map-attachment-title-text { display: block; min-width: 36px; min-height: 1.2em; outline: none; overflow-wrap: anywhere; flex: 1 1 auto; white-space: pre-wrap; user-select: none; -webkit-user-select: none; cursor: default; }
-.mind-map-attachment-title-text.is-editing { margin: 0; padding: 0; background: transparent; border: 0; outline: none; box-shadow: none; user-select: text; -webkit-user-select: text; cursor: text; }
-.mind-map-attachment-title-text.is-editing:focus { outline: none; box-shadow: none; }
+.mind-map-attachment-title-text.is-editing { margin: 0; padding: 0; box-shadow: none; user-select: text; -webkit-user-select: text; cursor: text; }
+.mind-map-attachment-title-text.is-editing:focus { box-shadow: none; }
 .mind-map-title-floating-editor p { display: block; min-height: 1.2em; margin: 0; padding: 0; }
 .editable-annotation { width: 100%; margin-top: 5px; padding-left: 7px; border-left: 1px solid currentColor; color: inherit; }
 .editable-annotation-content { min-width: 36px; min-height: 1.5em; outline: none; color: inherit; font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; }
