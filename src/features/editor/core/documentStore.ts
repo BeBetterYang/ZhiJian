@@ -62,8 +62,6 @@ export class DocumentStore {
     if (options.recordHistory !== false) {
       const mergeKey = options.mergeKey ?? (command.type === 'updateContent' ? command.mergeKey : undefined);
       this.#history = pushHistory(this.#history, { before, after, command, mergeKey }, options);
-    } else {
-      this.#history = createHistoryState();
     }
 
     this.#refreshSnapshot();
@@ -88,8 +86,6 @@ export class DocumentStore {
         command: { type: 'transaction', commands },
         mergeKey: options.mergeKey,
       }, options);
-    } else {
-      this.#history = createHistoryState();
     }
 
     this.#refreshSnapshot();
@@ -122,6 +118,12 @@ export class DocumentStore {
   markSaved(): void {
     if (!this.#dirty) return;
     this.#dirty = false;
+    this.#refreshSnapshot();
+    this.#emit();
+  }
+
+  resetHistory(): void {
+    this.#history = createHistoryState();
     this.#refreshSnapshot();
     this.#emit();
   }

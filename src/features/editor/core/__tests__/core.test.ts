@@ -346,6 +346,48 @@ describe('ZhiJian global history', () => {
     expect(store.getSnapshot().dirty).toBe(false);
   });
 
+  it('does not clear existing history when recordHistory is false', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: 'A' },
+    }));
+    store.execute(documentCommands.updateContent('a', 'A updated'));
+    const undoLengthBeforeSilentMutation = store.getSnapshot().history.undoStack.length;
+
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'b', content: 'B' },
+    }), { recordHistory: false });
+
+    expect(store.getSnapshot().history.undoStack).toHaveLength(undoLengthBeforeSilentMutation);
+    expect(store.getDocument().nodes.b.content).toBe('B');
+    expect(store.undo()).toBe(true);
+    expect(store.getDocument().nodes.a.content).toBe('A');
+  });
+
+  it('resets history explicitly without changing document or dirty state', () => {
+    const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
+    store.execute(documentCommands.createNode({
+      type: 'createNode',
+      parentId: 'root',
+      node: { id: 'a', content: 'A' },
+    }));
+    const documentBeforeReset = store.getDocument();
+    const dirtyBeforeReset = store.getSnapshot().dirty;
+
+    store.resetHistory();
+
+    expect(store.getSnapshot().history.undoStack).toHaveLength(0);
+    expect(store.getSnapshot().history.redoStack).toHaveLength(0);
+    expect(store.getDocument()).toEqual(documentBeforeReset);
+    expect(store.getSnapshot().dirty).toBe(dirtyBeforeReset);
+    expect(store.undo()).toBe(false);
+  });
+
   it('keeps getSnapshot reference stable until store state changes', () => {
     const store = createDocumentStore(createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 }));
     const snapshot1 = store.getSnapshot();
