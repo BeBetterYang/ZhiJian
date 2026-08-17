@@ -147,21 +147,6 @@ function getCanvasBackground(node: MindMapNode) {
   return typeof value === 'string' && value ? value : '#fff';
 }
 
-type FloatingTitleEditorState = {
-  top: number;
-  left: number;
-  minWidth: number;
-  maxWidth: number;
-  background: string;
-  color: string;
-  fontFamily: string;
-  fontSize: string;
-  fontWeight: string;
-  fontStyle: string;
-  lineHeight: string;
-  textDecoration: string;
-};
-
 type MindMapViewData = {
   transform: Record<string, unknown>;
   state: {
@@ -577,10 +562,8 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
   const attachmentRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLDivElement | null>(null);
   const titleTextRef = useRef<HTMLSpanElement | null>(null);
-  const floatingTitleRef = useRef<HTMLDivElement | null>(null);
   const editingTitleHtmlRef = useRef('');
   const refreshNodeAfterTitleEditRef = useRef(false);
-  const [floatingTitleEditor, setFloatingTitleEditor] = useState<FloatingTitleEditorState | null>(null);
   const text = String(node.getData('text') || '');
   const richText = Boolean(node.getData('richText') || /<[^>]+>/.test(text));
   const customTextWidth = Number(node.getData('customTextWidth')) || 0;
@@ -672,55 +655,52 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
     syncAttachmentSize();
   }, [annotation, annotationVisible, syncAttachmentSize, tableState, text]);
 
+  // 进入原位编辑时，把光标定位到末尾
   useLayoutEffect(() => {
-    const editor = floatingTitleRef.current;
-    if (!floatingTitleEditor || !editor) return;
-    editor.innerHTML = editingTitleHtmlRef.current;
-    editor.focus({ preventScroll: true });
+    if (!isTitleEditing) return;
+    const element = titleTextRef.current;
+    if (!element) return;
+    element.focus({ preventScroll: true });
     const range = document.createRange();
     const selection = window.getSelection();
-    range.selectNodeContents(editor);
+    range.selectNodeContents(element);
     range.collapse(false);
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, [floatingTitleEditor]);
+  }, [isTitleEditing]);
 
   // 编辑期间实时自适应节点框尺寸：只更新当前节点的 SVG shape / foreignObject，
   // 不触发 mindMap.render()（全树 layout）。其他节点保持原位，编辑结束统一重排
   useEffect(() => {
-    if (!floatingTitleEditor) return;
-    const editorEl = floatingTitleRef.current;
-    const titleEl = titleTextRef.current;
+    if (!isTitleEditing) return;
     const attachmentEl = attachmentRef.current;
-    if (!editorEl || !titleEl) return;
+    if (!attachmentEl) return;
 
     let rafId = 0;
     const syncNodeBox = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        // 把浮动编辑器内容回写到原 span（与 finishTitleEdit 一致地 normalize），
-        // 让 getSize 测量最新内容，避免编辑结束尺寸跳变
-        titleEl.innerHTML = normalizeMarkdownBoldHtml(editorEl.innerHTML);
-        // 清除 syncAttachmentSize 设置的固定 inline width，让 max-content 生效
-        if (attachmentEl) attachmentEl.style.width = '';
         const resizable = node as unknown as ResizableMindMapNode;
         if (typeof resizable.getSize !== 'function') return;
+        // getSize([]) 只重新测量当前节点（recreateTypes=[] 不重建 React 子树），
+        // 不写 node.data.text、不触发 data_change、不触发整树 layout
         const sizeChanged = resizable.getSize([]);
         if (sizeChanged && typeof resizable.customNodeContentRealtimeLayout === 'function') {
+          // 只重建当前节点 shapeNode / hoverNode / foreignObject 尺寸
           resizable.customNodeContentRealtimeLayout();
         }
       });
     };
 
     const observer = new ResizeObserver(syncNodeBox);
-    observer.observe(editorEl);
+    observer.observe(attachmentEl);
     syncNodeBox();
     return () => {
       observer.disconnect();
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [floatingTitleEditor, node]);
+  }, [isTitleEditing, node]);
 
   const updateTable = (nextTable: EditableTableData) => {
     const formattedTable = {
@@ -751,32 +731,11 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
     activateNode();
     const element = titleTextRef.current;
     if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const computed = window.getComputedStyle(element);
-    const foreignObject = element.closest('foreignObject');
-    const foreignRect = foreignObject?.getBoundingClientRect();
-    const foreignWidth = Number(foreignObject?.getAttribute('width')) || foreignRect?.width || 1;
-    const viewScale = foreignRect ? foreignRect.width / foreignWidth : 1;
-    const fontSize = Number.parseFloat(computed.fontSize) || 14;
-    const lineHeight = Number.parseFloat(computed.lineHeight) || fontSize * 1.2;
     editingTitleHtmlRef.current = element.innerHTML;
-    flushSync(() => {
-      setIsTitleEditing(true);
-      setFloatingTitleEditor({
-        top: rect.top,
-        left: rect.left,
-        minWidth: Math.max(36, rect.width),
-        maxWidth: 500 * viewScale,
-        background: getCanvasBackground(node),
-        color: computed.color,
-        fontFamily: computed.fontFamily,
-        fontSize: `${fontSize * viewScale}px`,
-        fontWeight: computed.fontWeight,
-        fontStyle: computed.fontStyle,
-        lineHeight: `${lineHeight * viewScale}px`,
-        textDecoration: computed.textDecoration,
-      });
-    });
+    // 清除 syncAttachmentSize 设置的固定 inline width，让 CSS max-content 接管，
+    // 节点框宽度随编辑内容自然变化
+    if (attachmentRef.current) attachmentRef.current.style.width = '';
+    setIsTitleEditing(true);
   };
   const reportTextSelection = (element: HTMLElement, commit?: (html: string) => void) => {
     const selection = window.getSelection();
@@ -806,11 +765,12 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
     refreshNodeAfterTitleEditRef.current = false;
     editingTitleHtmlRef.current = nextText;
     if (titleTextRef.current) titleTextRef.current.innerHTML = nextText;
-    setFloatingTitleEditor(null);
-    setIsTitleEditing(false);
+    // 先把最终文本写入 nodeData，这样随后 setIsTitleEditing(false) 触发的
+    // 重渲染能读到最新 text，避免 React 用旧 dangerouslySetInnerHTML 覆盖回旧内容
     if (nextText !== text) {
       node.mindMap.execCommand('SET_NODE_DATA', node, { text: nextText, richText: true });
     }
+    setIsTitleEditing(false);
     if (nextText !== text || shouldRefreshNode) {
       window.requestAnimationFrame(() => {
         const renderer = node.mindMap.renderer as TextEditableRenderer;
@@ -853,8 +813,8 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
         <span
           ref={titleTextRef}
           className={`mind-map-attachment-title-text${isTitleEditing ? ' is-editing' : ''}${node.getData('_todoChecked') ? ' is-done' : ''}`}
-          style={{ ...titleStyle, visibility: floatingTitleEditor ? 'hidden' : undefined }}
-          contentEditable={false}
+          style={titleStyle}
+          contentEditable={isTitleEditing}
           suppressContentEditableWarning
           tabIndex={-1}
           onClick={(event) => {
@@ -865,62 +825,7 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
             event.stopPropagation();
             beginTitleEdit();
           }}
-          {...(richText ? { dangerouslySetInnerHTML: { __html: text } } : { children: text })}
-        />
-        {Boolean(node.getData('note')) && (
-          <Tooltip content="节点描述">
-            <Button
-              className="mind-map-node-description-button"
-              type="text"
-              size="mini"
-              aria-label="打开节点描述"
-              icon={<IconInfoCircle />}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                activateNode();
-                (node.mindMap as EventfulMindMap).emit(CUSTOM_NODE_DESCRIPTION_EVENT, node);
-              }}
-            />
-          </Tooltip>
-        )}
-      </div>
-      {floatingTitleEditor && createPortal(
-        <div
-          ref={floatingTitleRef}
-          className="mind-map-title-floating-editor mind-map-floating-editor"
-          contentEditable
-          suppressContentEditableWarning
-          role="textbox"
-          aria-label="节点标题"
-          style={{
-            position: 'fixed',
-            top: floatingTitleEditor.top,
-            left: floatingTitleEditor.left,
-            zIndex: 12000,
-            width: 'max-content',
-            minWidth: floatingTitleEditor.minWidth,
-            maxWidth: floatingTitleEditor.maxWidth,
-            minHeight: '1.2em',
-            padding: 0,
-            border: 0,
-            outline: 'none',
-            background: floatingTitleEditor.background,
-            boxShadow: 'none',
-            color: floatingTitleEditor.color,
-            fontFamily: floatingTitleEditor.fontFamily,
-            fontSize: floatingTitleEditor.fontSize,
-            fontWeight: floatingTitleEditor.fontWeight,
-            fontStyle: floatingTitleEditor.fontStyle,
-            lineHeight: floatingTitleEditor.lineHeight,
-            textDecoration: floatingTitleEditor.textDecoration,
-            whiteSpace: 'pre-wrap',
-            overflowWrap: 'anywhere',
-          }}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
+          onKeyDown={isTitleEditing ? (event) => {
             const key = event.key.toLowerCase();
             const command = event.ctrlKey || event.metaKey;
             const isFormattingShortcut = (command && ['b', 'i', 'u', 'enter'].includes(key))
@@ -946,20 +851,41 @@ function MindMapNodeContent({ node, table, images }: { node: MindMapNode; table?
                 node.mindMap.execCommand(event.shiftKey ? 'INSERT_PARENT_NODE' : 'INSERT_CHILD_NODE', true, [node]);
               });
             }
-          }}
-          onInput={(event) => { editingTitleHtmlRef.current = event.currentTarget.innerHTML; }}
-          onPointerUp={(event) => reportTextSelection(event.currentTarget, (html) => {
+          } : undefined}
+          onInput={isTitleEditing ? (event) => {
+            editingTitleHtmlRef.current = event.currentTarget.innerHTML;
+          } : undefined}
+          onPointerUp={isTitleEditing ? (event) => reportTextSelection(event.currentTarget, (html) => {
             event.currentTarget.innerHTML = html;
             editingTitleHtmlRef.current = html;
-          })}
-          onKeyUp={(event) => reportTextSelection(event.currentTarget, (html) => {
+          }) : undefined}
+          onKeyUp={isTitleEditing ? (event) => reportTextSelection(event.currentTarget, (html) => {
             event.currentTarget.innerHTML = html;
             editingTitleHtmlRef.current = html;
-          })}
-          onBlur={(event) => finishTitleEdit(event.currentTarget.innerHTML)}
-        />,
-        document.body,
-      )}
+          }) : undefined}
+          onBlur={isTitleEditing ? (event) => finishTitleEdit(event.currentTarget.innerHTML) : undefined}
+          {...(!isTitleEditing && richText ? { dangerouslySetInnerHTML: { __html: text } } : {})}
+        >
+          {(!isTitleEditing && !richText) ? text : null}
+        </span>
+        {Boolean(node.getData('note')) && (
+          <Tooltip content="节点描述">
+            <Button
+              className="mind-map-node-description-button"
+              type="text"
+              size="mini"
+              aria-label="打开节点描述"
+              icon={<IconInfoCircle />}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                activateNode();
+                (node.mindMap as EventfulMindMap).emit(CUSTOM_NODE_DESCRIPTION_EVENT, node);
+              }}
+            />
+          </Tooltip>
+        )}
+      </div>
       {annotationVisible && (
         <EditableAnnotation
           value={annotation}
@@ -1306,12 +1232,10 @@ export default function MindMapEditor({
       const change = args[0] as { node?: MindMapNode; text?: string } | undefined;
       if (!change?.node || typeof change.text !== 'string') return;
       const formattedText = normalizeMarkdownBoldHtml(change.text);
-      // 编辑期间把文本写回 nodeData，让 getSize 测量最新内容
-      change.node.mindMap.execCommand('SET_NODE_DATA', change.node, { text: formattedText, richText: true });
-      // 只重测当前节点尺寸 + 重建当前节点 group，不触发全树 layout
-      const resizable = change.node as unknown as ResizableMindMapNode;
-      if (typeof resizable.reRender === 'function') {
-        resizable.reRender([]);
+      // 仅在出现 markdown 粗体模式时把规范化结果写回 nodeData，
+      // 不每字符 reRender / 不触发 DocumentStore / 不触发整树 layout
+      if (formattedText !== change.text) {
+        change.node.mindMap.execCommand('SET_NODE_DATA', change.node, { text: formattedText, richText: true });
       }
     };
     const handleCustomTextSelection = (...args: unknown[]) => {
