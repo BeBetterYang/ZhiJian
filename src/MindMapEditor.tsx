@@ -62,7 +62,7 @@ import {
   type SimpleMindMapRendererNode,
   type MindMapViewNode,
 } from './features/editor/mindmap';
-import { createEditingNodeResizer } from './features/editor/mindmap/nodeEditingResize';
+import { createEditingNodeResizer, createEditingTextReveal } from './features/editor/mindmap/nodeEditingResize';
 import SharedEditorToolbar from './SharedEditorToolbar';
 import EditableNodeTable, { type EditableTableData } from './EditableNodeTable';
 import EditableImageGallery from './EditableImageGallery';
@@ -1240,6 +1240,11 @@ export default function MindMapEditor({
     const editRenderer = instance.renderer as TextEditableRenderer;
     instance.off('node_text_edit_change', editRenderer.onNodeTextEditChange);
     const resizeEditingNode = createEditingNodeResizer(instance);
+    // With openRealtimeRenderOnNodeTextEdit, entering an edit hides the node's own
+    // SVG text with display:none; a later render-while-editing then re-reads that
+    // 0×0 element to position the editor overlay and drops it in the top-left
+    // corner. Keep the text measurable-but-invisible (opacity:0) instead.
+    const revealEditingText = createEditingTextReveal(instance);
 
     let viewPersistenceReady = false;
 
@@ -1357,6 +1362,7 @@ export default function MindMapEditor({
     instance.on('rich_text_selection_change', handleRichTextSelection);
     instance.on('node_text_edit_change', handleNodeTextEditChange);
     instance.on('node_text_edit_change', resizeEditingNode);
+    instance.on('before_show_text_edit', revealEditingText);
     instance.on(CUSTOM_NODE_TEXT_SELECTION_EVENT, handleCustomTextSelection);
     instance.on(CUSTOM_NODE_DESCRIPTION_EVENT, handleOpenNodeDescription);
     instance.on('node_contextmenu', handleNodeContextMenu);
@@ -1486,6 +1492,7 @@ export default function MindMapEditor({
       instance.off('node_text_edit_change', handleNodeTextEditChange);
       instance.off('node_text_edit_change', resizeEditingNode);
       resizeEditingNode.cancel();
+      instance.off('before_show_text_edit', revealEditingText);
       instance.off(CUSTOM_NODE_TEXT_SELECTION_EVENT, handleCustomTextSelection);
       instance.off(CUSTOM_NODE_DESCRIPTION_EVENT, handleOpenNodeDescription);
       instance.off('node_contextmenu', handleNodeContextMenu);

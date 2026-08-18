@@ -76,6 +76,46 @@ export function createEditingNodeResizer(
   return debounce(run, wait);
 }
 
+// The edited node's rendered text lives at `_textData.node` — an SVG.js element
+// whose `.node` is the underlying DOM `<g>` we restyle. simple-mind-map keeps this
+// element mounted across renders-while-editing (it isn't rebuilt until edit ends),
+// so a one-time style flip on entry sticks for the whole session.
+type RealtimeEditInstance = MindMap & {
+  richText?: {
+    node?: (MindMapNode & { _textData?: { node?: { node?: SVGGraphicsElement } } }) | null;
+  } | null;
+};
+
+/**
+ * Keep the currently-edited node's own text laid-out-but-invisible during a live
+ * edit, instead of `display:none`.
+ *
+ * With `openRealtimeRenderOnNodeTextEdit` on, `TextEdit.show` hides the node's SVG
+ * text via `display:none` (core/render/TextEdit.js) so it doesn't double with the
+ * transparent editor overlay. But that same overlay is re-positioned by
+ * `RichText.updateTextEditNode`, which reads this element's `getBoundingClientRect()`
+ * on every render-while-editing (triggered via `afterExecCommand → node_tree_render_end`,
+ * TextEdit.js). A `display:none` element measures 0×0, so the overlay snaps to the
+ * top-left corner — e.g. when a click commits the previously-edited node, or on the
+ * bold-normalize command. Switching to `opacity:0` keeps the element measurable at
+ * the node's real position (no drift) while staying invisible (no doubling).
+ *
+ * The tweak needs no teardown: on edit-end the node is no longer the current edit
+ * node, so the next render rebuilds its text fresh with the normal opacity.
+ *
+ * Returns a `before_show_text_edit` handler — that event fires after `RichText.node`
+ * is set and after the node's text was hidden, so the element is available to restyle.
+ */
+export function createEditingTextReveal(instance: MindMap): () => void {
+  const richTextInstance = instance as RealtimeEditInstance;
+  return () => {
+    const dom = richTextInstance.richText?.node?._textData?.node?.node;
+    if (!dom) return;
+    dom.style.display = '';
+    dom.style.opacity = '0';
+  };
+}
+
 /** Trailing-edge debounce with a `cancel()` for teardown. Self-contained (no deps). */
 function debounce<A extends unknown[]>(
   fn: (...args: A) => void,

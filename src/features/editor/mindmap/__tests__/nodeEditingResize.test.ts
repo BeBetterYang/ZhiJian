@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type MindMap from 'simple-mind-map';
-import { createEditingNodeResizer } from '../nodeEditingResize';
+import { createEditingNodeResizer, createEditingTextReveal } from '../nodeEditingResize';
 
 function createMockNode() {
   return {
@@ -104,5 +104,38 @@ describe('createEditingNodeResizer', () => {
 
     resize({ node: node as never, text: 'boom' });
     expect(() => vi.advanceTimersByTime(100)).not.toThrow();
+  });
+});
+
+/** Build a MindMap-like instance whose edited node exposes a restylable DOM element. */
+function createRevealInstance(styleInit: { display?: string; opacity?: string } = {}) {
+  const dom = { style: { display: styleInit.display ?? 'none', opacity: styleInit.opacity ?? '1' } };
+  const instance = {
+    richText: { node: { _textData: { node: { node: dom } } } },
+  };
+  return { instance: instance as unknown as MindMap, dom };
+}
+
+describe('createEditingTextReveal', () => {
+  it('flips the edited node text from display:none to invisible-but-measurable', () => {
+    const { instance, dom } = createRevealInstance({ display: 'none', opacity: '1' });
+    const reveal = createEditingTextReveal(instance);
+
+    reveal();
+
+    // display:none removed → element is laid out and measurable again…
+    expect(dom.style.display).toBe('');
+    // …but opacity:0 keeps it invisible, so there is no text doubling.
+    expect(dom.style.opacity).toBe('0');
+  });
+
+  it('no-ops without throwing when no node is being edited', () => {
+    const reveal = createEditingTextReveal({ richText: { node: null } } as unknown as MindMap);
+    expect(() => reveal()).not.toThrow();
+  });
+
+  it('no-ops without throwing when the RichText plugin is absent', () => {
+    const reveal = createEditingTextReveal({} as unknown as MindMap);
+    expect(() => reveal()).not.toThrow();
   });
 });
