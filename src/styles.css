@@ -640,6 +640,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .smm-richtext-node-wrap,
 .smm-richtext-node-wrap p { margin: 0; padding: 0; }
 .smm-richtext-node-wrap p { min-height: 1.2em; line-height: inherit; }
+/* Node box is the editing surface: keep the editor overlay itself invisible so no
+   second background/shadow box shows. Scoped to the wrapper only — never descendants
+   or `*` — so inline highlight spans and the browser's ::selection stay intact. */
+.smm-node-edit-wrap,
+.smm-richtext-node-edit-wrap { background: transparent !important; box-shadow: none !important; }
 .mind-map-attachment-root { width: max-content; max-width: none; }
 .mind-map-attachment-node { display: flex; width: max-content; max-width: none; padding: 5px 15px; box-sizing: border-box; align-items: flex-start; flex-direction: column; color: inherit; font-size: 12px; }
 .mind-map-attachment-title { display: flex; width: 100%; min-height: 22px; padding: 0; box-sizing: border-box; align-items: center; gap: 6px; font-size: 14px; font-weight: 400; line-height: 1.2; white-space: normal; }

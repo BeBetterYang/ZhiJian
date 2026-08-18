@@ -62,6 +62,7 @@ import {
   type SimpleMindMapRendererNode,
   type MindMapViewNode,
 } from './features/editor/mindmap';
+import { createEditingNodeResizer } from './features/editor/mindmap/nodeEditingResize';
 import SharedEditorToolbar from './SharedEditorToolbar';
 import EditableNodeTable, { type EditableTableData } from './EditableNodeTable';
 import EditableImageGallery from './EditableImageGallery';
@@ -209,6 +210,9 @@ type ClipboardRenderer = MindMap['renderer'] & {
 type TextEditableRenderer = MindMap['renderer'] & {
   activeNodeList: MindMapNode[];
   renderByCustomNodeContentNode: (node: MindMapNode) => void;
+  // Native realtime-resize handler, bound only when openRealtimeRenderOnNodeTextEdit
+  // is on (core/render/Render.js). Stable debounced reference, so it can be `off()`-ed.
+  onNodeTextEditChange: (...args: unknown[]) => void;
   textEdit: {
     show: (options: { node: MindMapNode; e?: MouseEvent }) => void | Promise<void>;
     getBackground: (node: MindMapNode) => string;
@@ -1214,6 +1218,10 @@ export default function MindMapEditor({
       defaultInsertBelowSecondLevelNodeText: '新主题',
       mousewheelAction: 'move',
       isEndNodeTextEditOnClickOuter: false,
+      // Make the node's own box the editing surface: the RichText editor overlay
+      // becomes transparent (no fill, no drop-shadow) and the node's SVG text is
+      // hidden while editing, so no second "editor background" box appears.
+      openRealtimeRenderOnNodeTextEdit: true,
       isUseCustomNodeContent: true,
       customCreateNodeContent: createAttachmentNodeContent,
       createNodePrefixContent: createTodoPrefixContent,
@@ -1224,9 +1232,14 @@ export default function MindMapEditor({
       },
     });
 
-    // simple-mind-map falls back to white when a transparent node enters edit mode.
-    // Keep both its plain-text and rich-text editors on the actual canvas background.
-    (instance.renderer as TextEditableRenderer).textEdit.getBackground = getCanvasBackground;
+    // The node box itself is the editing surface (openRealtimeRenderOnNodeTextEdit).
+    // simple-mind-map's built-in realtime handler regrows the edited node but then runs
+    // a full-tree mindMap.render() on every debounced keystroke, shifting every other
+    // branch while typing. Swap it for a node-local resizer so only the edited node
+    // changes size mid-edit; the single full layout still happens on edit end.
+    const editRenderer = instance.renderer as TextEditableRenderer;
+    instance.off('node_text_edit_change', editRenderer.onNodeTextEditChange);
+    const resizeEditingNode = createEditingNodeResizer(instance);
 
     let viewPersistenceReady = false;
 
@@ -1343,6 +1356,7 @@ export default function MindMapEditor({
     instance.on('view_data_change', handleViewDataChange);
     instance.on('rich_text_selection_change', handleRichTextSelection);
     instance.on('node_text_edit_change', handleNodeTextEditChange);
+    instance.on('node_text_edit_change', resizeEditingNode);
     instance.on(CUSTOM_NODE_TEXT_SELECTION_EVENT, handleCustomTextSelection);
     instance.on(CUSTOM_NODE_DESCRIPTION_EVENT, handleOpenNodeDescription);
     instance.on('node_contextmenu', handleNodeContextMenu);
@@ -1470,6 +1484,8 @@ export default function MindMapEditor({
       instance.off('view_data_change', handleViewDataChange);
       instance.off('rich_text_selection_change', handleRichTextSelection);
       instance.off('node_text_edit_change', handleNodeTextEditChange);
+      instance.off('node_text_edit_change', resizeEditingNode);
+      resizeEditingNode.cancel();
       instance.off(CUSTOM_NODE_TEXT_SELECTION_EVENT, handleCustomTextSelection);
       instance.off(CUSTOM_NODE_DESCRIPTION_EVENT, handleOpenNodeDescription);
       instance.off('node_contextmenu', handleNodeContextMenu);
