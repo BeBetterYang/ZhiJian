@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, documentCommands, reduceDocument } from '../../core';
+import { createDocument, documentCommands, reduceDocument, type CreateNodeInput } from '../../core';
 import { serializeMarkdown } from '../serializer';
 
-function buildDocument(builder: (create: (parentId: string, input: { id: string; content: string; blockType?: 'text' | 'heading1' | 'heading2' | 'heading3'; todo?: { enabled: true; checked: boolean }; note?: string; images?: Array<{ id: string; url: string; alt?: string }>; table?: { rows: string[][] } }) => string) => void): ReturnType<typeof createDocument> {
+function buildDocument(
+  builder: (create: (parentId: string, input: CreateNodeInput & { id: string }) => string) => void,
+): ReturnType<typeof createDocument> {
   let document = createDocument({ id: 'doc', rootId: 'root', title: 'Root', now: 1 });
-  const create = (parentId: string, input: { id: string; content: string; blockType?: 'text' | 'heading1' | 'heading2' | 'heading3'; todo?: { enabled: true; checked: boolean }; note?: string; images?: Array<{ id: string; url: string; alt?: string }>; table?: { rows: string[][] } }): string => {
+  const create = (parentId: string, input: CreateNodeInput & { id: string }): string => {
     document = reduceDocument(document, documentCommands.createNode({
       type: 'createNode',
       parentId,
@@ -17,7 +19,7 @@ function buildDocument(builder: (create: (parentId: string, input: { id: string;
 }
 
 describe('serializeMarkdown', () => {
-  it('serializes root, heading, todo, note, image and table from ZhiJianDocument', () => {
+  it('serializes root, heading, todo, description, image and table from ZhiJianDocument', () => {
     let document = createDocument({ id: 'doc', rootId: 'root', title: 'Root', now: 1 });
     document = reduceDocument(document, documentCommands.createNode({
       type: 'createNode',
@@ -26,12 +28,13 @@ describe('serializeMarkdown', () => {
         id: 'a',
         content: 'A **bold**',
         blockType: 'heading2',
-        todo: { enabled: true, checked: true },
-        note: 'Note',
+        todo: { checked: true },
+        description: 'Note',
         images: [{ id: 'image', url: 'https://example.com/a.png', alt: 'A' }],
-        table: { rows: [['A', 'B'], ['1', '2']] },
       },
     }));
+    // 表格是独立的 TableNode，作为兄弟节点存在
+    document = reduceDocument(document, documentCommands.insertSiblingTable('a', 'a-table', { rows: [['A', 'B'], ['1', '2']] }));
 
     const markdown = serializeMarkdown(document);
 
@@ -92,7 +95,7 @@ describe('serializeMarkdown', () => {
 
   it('keeps root child todo as top-level block without bullet', () => {
     const document = buildDocument((create) => {
-      create('root', { id: 'task', content: '任务', todo: { enabled: true, checked: false } });
+      create('root', { id: 'task', content: '任务', todo: { checked: false } });
     });
 
     const markdown = serializeMarkdown(document);
@@ -102,14 +105,16 @@ describe('serializeMarkdown', () => {
     expect(lines).not.toContain('- [ ] 任务');
   });
 
-  it('indents note/image/table attachments with the owning node', () => {
+  it('indents description/image/table attachments with the owning node', () => {
     const document = buildDocument((create) => {
-      // root child 直接带 note：附件无缩进
-      create('root', { id: 'rootNote', content: '根说明', note: '顶层批注' });
+      // root child 直接带 description：附件无缩进
+      create('root', { id: 'rootNote', content: '根说明', description: '顶层批注' });
       create('root', { id: 'product', content: '产品' });
-      // descendant 带图片/表格：附件缩进跟随 owner
+      // descendant 带图片：附件缩进跟随 owner
       create('product', { id: 'img', content: '图片节点', images: [{ id: 'img1', url: 'https://example.com/image.png', alt: '图片' }] });
-      create('product', { id: 'tbl', content: '表格测试', table: { rows: [['A', 'B'], ['1', '2']] } });
+      // descendant 带表格：表格是独立的 child TableNode
+      const tbl = create('product', { id: 'tbl', content: '表格测试' });
+      create(tbl, { id: 'tbl-table', kind: 'table', table: { rows: [['A', 'B'], ['1', '2']] } });
     });
 
     const markdown = serializeMarkdown(document);
@@ -123,6 +128,7 @@ describe('serializeMarkdown', () => {
     expect(lines).toContain('- 表格测试');
     // descendant 附件缩进 2 空格（depth 0 owner）
     expect(lines).toContain('  ![图片](https://example.com/image.png)');
+    // 表格作为 tbl(depth 0) 的 child(depth 1)，缩进 2 空格
     expect(lines).toContain('  | A | B |');
   });
 });

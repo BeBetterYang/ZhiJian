@@ -3,12 +3,22 @@ import {
   createDocument,
   createDocumentStore,
   documentCommands,
+  getNode,
   reduceDocument,
   validateDocument,
+  type ContentNode,
   type ZhiJianDocument,
 } from '../index';
 
 const orderedChildren = (document: ZhiJianDocument, nodeId = 'root') => document.nodes[nodeId].children;
+
+function contentNode(document: ZhiJianDocument, id: string): ContentNode {
+  const node = getNode(document, id);
+  if (node.kind !== 'content') throw new Error(`expected content node: ${id}`);
+  return node;
+}
+
+const contentText = (document: ZhiJianDocument, id: string): string => contentNode(document, id).content;
 
 function createFixtureDocument(): ZhiJianDocument {
   let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
@@ -60,15 +70,15 @@ describe('ZhiJian core document', () => {
 
     expect(document.rootId).toBe('root');
     expect(document.nodes.root.parentId).toBeNull();
-    expect(document.nodes.root.content).toBe('新手入门');
-    expect(document.nodes.root.blockType).toBe('root');
+    expect(contentText(document, 'root')).toBe('新手入门');
+    expect(contentNode(document, 'root').blockType).toBe('root');
     expect(validateDocument(document).valid).toBe(true);
   });
 
   it('treats root as document root instead of a normal heading node', () => {
     const document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 100 });
 
-    expect(document.nodes.root.blockType).toBe('root');
+    expect(contentNode(document, 'root').blockType).toBe('root');
     expect(() => reduceDocument(document, documentCommands.setBlockType('root', 'heading1')))
       .toThrow('Root node block type cannot be changed');
   });
@@ -151,12 +161,12 @@ describe('ZhiJian core document', () => {
     document = reduceDocument(document, documentCommands.updateContent('b', 'HelloWorld'));
     document = reduceDocument(document, documentCommands.splitNode('b', 5, 'b2'));
 
-    expect(document.nodes.b.content).toBe('Hello');
-    expect(document.nodes.b2.content).toBe('World');
+    expect(contentText(document, 'b')).toBe('Hello');
+    expect(contentText(document, 'b2')).toBe('World');
     expect(document.nodes.root.children).toEqual(['a', 'b', 'b2']);
 
     document = reduceDocument(document, documentCommands.mergeNode('b2', 'b'));
-    expect(document.nodes.b.content).toBe('HelloWorld');
+    expect(contentText(document, 'b')).toBe('HelloWorld');
     expect(document.nodes.b2).toBeUndefined();
     expect(document.nodes.root.children).toEqual(['a', 'b']);
   });
@@ -184,21 +194,65 @@ describe('ZhiJian core document', () => {
       .toThrow('Root node block type cannot be changed');
   });
 
-  it('updates node properties through commands', () => {
+  it('updates content node properties through commands', () => {
     let document = createFixtureDocument();
     document = reduceDocument(document, documentCommands.setBlockType('a', 'heading1'));
     document = reduceDocument(document, documentCommands.setTodoChecked('a', true));
-    document = reduceDocument(document, documentCommands.setNote('a', '描述'));
+    document = reduceDocument(document, documentCommands.setDescription('a', '描述'));
     document = reduceDocument(document, documentCommands.setImages('a', [{ id: 'image-1', url: 'https://example.com/a.png' }]));
-    document = reduceDocument(document, documentCommands.setTable('a', { rows: [['1', '2'], ['3', '4']] }));
     document = reduceDocument(document, documentCommands.setStyle('a', { color: '#f00', backgroundColor: '#ff0' }));
 
-    expect(document.nodes.a.blockType).toBe('heading1');
-    expect(document.nodes.a.todo).toEqual({ enabled: true, checked: true });
-    expect(document.nodes.a.note).toBe('描述');
-    expect(document.nodes.a.images?.[0].id).toBe('image-1');
-    expect(document.nodes.a.table?.rows[1]).toEqual(['3', '4']);
-    expect(document.nodes.a.style?.color).toBe('#f00');
+    const a = contentNode(document, 'a');
+    expect(a.blockType).toBe('heading1');
+    expect(a.todo).toEqual({ checked: true });
+    expect(a.description).toBe('描述');
+    expect(a.images?.[0].id).toBe('image-1');
+    expect(a.style?.color).toBe('#f00');
+    expect(validateDocument(document).valid).toBe(true);
+  });
+
+  it('removes a description and toggles todo through commands', () => {
+    let document = createFixtureDocument();
+    document = reduceDocument(document, documentCommands.setDescription('a', '描述'));
+    document = reduceDocument(document, documentCommands.removeDescription('a'));
+    expect(contentNode(document, 'a').description).toBeUndefined();
+
+    document = reduceDocument(document, documentCommands.toggleTodo('a'));
+    expect(contentNode(document, 'a').todo).toEqual({ checked: false });
+    document = reduceDocument(document, documentCommands.toggleTodo('a'));
+    expect(contentNode(document, 'a').todo).toBeUndefined();
+    expect(validateDocument(document).valid).toBe(true);
+  });
+
+  it('converts a content node into a table node and updates its rows', () => {
+    let document = createFixtureDocument();
+    document = reduceDocument(document, documentCommands.convertToTable('a1', { rows: [['1', '2'], ['3', '4']] }));
+
+    const table = getNode(document, 'a1');
+    expect(table.kind).toBe('table');
+    if (table.kind === 'table') {
+      expect(table.table.rows[1]).toEqual(['3', '4']);
+    }
+
+    document = reduceDocument(document, documentCommands.updateTable('a1', { rows: [['x', 'y']] }));
+    const updated = getNode(document, 'a1');
+    if (updated.kind === 'table') {
+      expect(updated.table.rows).toEqual([['x', 'y']]);
+    }
+    expect(validateDocument(document).valid).toBe(true);
+  });
+
+  it('inserts a sibling table after a content node', () => {
+    let document = createFixtureDocument();
+    document = reduceDocument(document, documentCommands.insertSiblingTable('a', 'a-table', { rows: [['A', 'B']] }));
+
+    expect(document.nodes.root.children).toEqual(['a', 'a-table', 'b']);
+    const table = getNode(document, 'a-table');
+    expect(table.kind).toBe('table');
+    if (table.kind === 'table') {
+      expect(table.table.rows).toEqual([['A', 'B']]);
+    }
+    expect(contentText(document, 'a')).toBe('A');
     expect(validateDocument(document).valid).toBe(true);
   });
 
@@ -266,13 +320,13 @@ describe('ZhiJian global history', () => {
     }));
     store.execute(documentCommands.updateContent('a', 'A updated'));
 
-    expect(store.getDocument().nodes.a.content).toBe('A updated');
+    expect(contentText(store.getDocument(), 'a')).toBe('A updated');
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.a.content).toBe('A');
+    expect(contentText(store.getDocument(), 'a')).toBe('A');
     expect(store.undo()).toBe(true);
     expect(store.getDocument().nodes.a).toBeUndefined();
     expect(store.redo()).toBe(true);
-    expect(store.getDocument().nodes.a.content).toBe('A');
+    expect(contentText(store.getDocument(), 'a')).toBe('A');
   });
 
   it('merges continuous text input into one history entry', () => {
@@ -288,9 +342,9 @@ describe('ZhiJian global history', () => {
     store.execute(documentCommands.updateContent('a', '新手入门', { mergeKey: 'edit:a' }), { timestamp: 300 });
 
     expect(store.getSnapshot().history.undoStack).toHaveLength(2);
-    expect(store.getDocument().nodes.a.content).toBe('新手入门');
+    expect(contentText(store.getDocument(), 'a')).toBe('新手入门');
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.a.content).toBe('');
+    expect(contentText(store.getDocument(), 'a')).toBe('');
   });
 
   it('caps undo history to maxEntries while preserving recent undo operations', () => {
@@ -306,13 +360,13 @@ describe('ZhiJian global history', () => {
     }
 
     expect(store.getSnapshot().history.undoStack).toHaveLength(100);
-    expect(store.getDocument().nodes.a.content).toBe('120');
+    expect(contentText(store.getDocument(), 'a')).toBe('120');
 
     for (let index = 0; index < 100; index += 1) {
       expect(store.undo()).toBe(true);
     }
 
-    expect(store.getDocument().nodes.a.content).toBe('20');
+    expect(contentText(store.getDocument(), 'a')).toBe('20');
     expect(store.undo()).toBe(false);
   });
 
@@ -331,7 +385,7 @@ describe('ZhiJian global history', () => {
     expect(store.getSnapshot().history.undoStack.length).toBeLessThanOrEqual(100);
     expect(store.getSnapshot().history.undoStack).toHaveLength(2);
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.a.content).toBe('');
+    expect(contentText(store.getDocument(), 'a')).toBe('');
   });
 
   it('marks dirty changes and supports markSaved', () => {
@@ -364,9 +418,9 @@ describe('ZhiJian global history', () => {
     }), { recordHistory: false });
 
     expect(store.getSnapshot().history.undoStack).toHaveLength(undoLengthBeforeSilentMutation);
-    expect(store.getDocument().nodes.b.content).toBe('B');
+    expect(contentText(store.getDocument(), 'b')).toBe('B');
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.a.content).toBe('A');
+    expect(contentText(store.getDocument(), 'a')).toBe('A');
   });
 
   it('resets history explicitly without changing document or dirty state', () => {
@@ -445,6 +499,6 @@ describe('ZhiJian core large tree benchmark', () => {
     console.info(`1000-node core benchmark: ${elapsedMs.toFixed(2)}ms`);
 
     expect(result.valid).toBe(true);
-    expect(store.getDocument().nodes['node-0'].content).toBe('Updated 0');
+    expect(contentText(store.getDocument(), 'node-0')).toBe('Updated 0');
   });
 });

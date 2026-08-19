@@ -3,8 +3,11 @@ import {
   createDocument,
   createDocumentStore,
   documentCommands,
+  getNode,
+  getNodeContent,
   reduceDocument,
   validateDocument,
+  type ContentNode,
   type DocumentCommand,
   type ZhiJianDocument,
 } from '../../core';
@@ -16,17 +19,23 @@ import {
 import { createOutlineViewState } from '../outlineViewState';
 import type { MutableOutlineViewState } from '../outlineTypes';
 
+function contentNode(document: ZhiJianDocument, id: string): ContentNode {
+  const node = getNode(document, id);
+  if (node.kind !== 'content') throw new Error(`expected content node: ${id}`);
+  return node;
+}
+
 function createOutlineFixture(): { document: ZhiJianDocument; viewState: MutableOutlineViewState } {
   let document = createDocument({ id: 'doc', rootId: 'root', title: '新手入门', now: 1 });
   document = reduceDocument(document, documentCommands.createNode({
     type: 'createNode',
     parentId: 'root',
-    node: { id: 'a', content: 'A', blockType: 'heading1', note: 'Note A' },
+    node: { id: 'a', content: 'A', blockType: 'heading1', description: 'Note A' },
   }));
   document = reduceDocument(document, documentCommands.createNode({
     type: 'createNode',
     parentId: 'root',
-    node: { id: 'b', content: 'B', todo: { enabled: true, checked: false } },
+    node: { id: 'b', content: 'B', todo: { checked: false } },
   }));
   document = reduceDocument(document, documentCommands.createNode({
     type: 'createNode',
@@ -165,8 +174,8 @@ describe('outline adapter', () => {
 
     expect(data[0].topic).toBe('A');
     expect(data[0].children?.map((item) => item.id)).toEqual(['a1']);
-    expect(document.nodes.a.blockType).toBe('heading1');
-    expect(document.nodes.a.note).toBe('Note A');
+    expect(contentNode(document, 'a').blockType).toBe('heading1');
+    expect(contentNode(document, 'a').description).toBe('Note A');
   });
 
   it('uses the global DocumentStore history for todo commands', () => {
@@ -174,11 +183,11 @@ describe('outline adapter', () => {
     const store = createDocumentStore(document);
 
     store.execute(documentCommands.setTodoChecked('b', true));
-    expect(store.getDocument().nodes.b.todo?.checked).toBe(true);
+    expect(contentNode(store.getDocument(), 'b').todo?.checked).toBe(true);
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.b.todo?.checked).toBe(false);
+    expect(contentNode(store.getDocument(), 'b').todo?.checked).toBe(false);
     expect(store.redo()).toBe(true);
-    expect(store.getDocument().nodes.b.todo?.checked).toBe(true);
+    expect(contentNode(store.getDocument(), 'b').todo?.checked).toBe(true);
   });
 
   it('keeps IME composition events out of structural command diff', () => {
@@ -231,12 +240,12 @@ describe('outline adapter', () => {
     store.executeTransaction(result.commands);
     const newNodeId = result.idReplacements.get('outliner-split');
 
-    expect(store.getDocument().nodes.hello.content).toBe('Hel');
+    expect(getNodeContent(store.getDocument().nodes.hello)).toBe('Hel');
     expect(store.getDocument().nodes.hello.id).toBe('hello');
     expect(newNodeId).toBeTruthy();
-    expect(store.getDocument().nodes[newNodeId ?? '']?.content).toBe('lo');
+    expect(getNodeContent(store.getDocument().nodes[newNodeId ?? ''])).toBe('lo');
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.hello.content).toBe('Hello');
+    expect(getNodeContent(store.getDocument().nodes.hello)).toBe('Hello');
     expect(store.getDocument().nodes[newNodeId ?? '']).toBeUndefined();
   });
 
@@ -255,12 +264,12 @@ describe('outline adapter', () => {
     const store = createDocumentStore(document);
 
     store.execute(documentCommands.mergeNode('world'));
-    expect(store.getDocument().nodes.hello.content).toBe('HelloWorld');
+    expect(getNodeContent(store.getDocument().nodes.hello)).toBe('HelloWorld');
     expect(store.getDocument().nodes.world).toBeUndefined();
     expect(validateDocument(store.getDocument()).valid).toBe(true);
     expect(store.undo()).toBe(true);
-    expect(store.getDocument().nodes.hello.content).toBe('Hello');
-    expect(store.getDocument().nodes.world.content).toBe('World');
+    expect(getNodeContent(store.getDocument().nodes.hello)).toBe('Hello');
+    expect(getNodeContent(store.getDocument().nodes.world)).toBe('World');
   });
 
   it('keeps tree valid through repeated Tab and Shift+Tab command cycles', () => {

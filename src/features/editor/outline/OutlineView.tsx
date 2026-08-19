@@ -7,6 +7,7 @@ import { marked } from 'marked';
 import {
   documentCommands,
   getNode,
+  getNodeContent,
   getPreviousVisibleNodeId,
   type DocumentStore,
   type NodeId,
@@ -42,6 +43,9 @@ function renderTable(rows: string[][]) {
 function renderNodeContent(document: ZhiJianDocument, text: string, item: { id: string }) {
   const node = document.nodes[item.id];
   if (!node) return renderInlineMarkdown(text);
+  if (node.kind === 'table') {
+    return `<span class="zj-outline-topic zj-outline-text zj-outline-table-node"></span>${renderTable(node.table.rows)}`;
+  }
   const classes = ['zj-outline-topic', `zj-outline-${node.blockType}`];
   if (node.todo?.checked) classes.push('is-done');
   const style = [
@@ -53,16 +57,15 @@ function renderNodeContent(document: ZhiJianDocument, text: string, item: { id: 
       node.clozes?.some((range) => index >= range.start && index < range.end) ? '_' : character
     )).join('')
     : text;
-  const todo = node.todo?.enabled
+  const todo = node.todo
     ? `<input class="zj-outline-todo" data-zj-outline-todo="${node.id}" type="checkbox"${node.todo.checked ? ' checked' : ''} />`
     : '';
-  const note = node.note ? `<div class="zj-outline-note">${escapeHtml(node.note)}</div>` : '';
+  const description = node.description ? `<div class="zj-outline-note">${escapeHtml(node.description)}</div>` : '';
   const images = node.images?.length
     ? `<div class="zj-outline-images">${node.images.map((image) => `<img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.alt ?? '')}" />`).join('')}</div>`
     : '';
-  const table = node.table ? renderTable(node.table.rows) : '';
 
-  return `<span class="${classes.join(' ')}"${style ? ` style="${style}"` : ''}>${todo}<span class="zj-outline-content">${renderInlineMarkdown(content || '')}</span></span>${note}${images}${table}`;
+  return `<span class="${classes.join(' ')}"${style ? ` style="${style}"` : ''}>${todo}<span class="zj-outline-content">${renderInlineMarkdown(content || '')}</span></span>${description}${images}`;
 }
 
 function getEditableElement(event: KeyboardEvent) {
@@ -116,7 +119,7 @@ export default function OutlineView({ store }: Props) {
 
   const handleTitleInput = useCallback((event: React.FormEvent<HTMLHeadingElement>) => {
     const nextTitle = event.currentTarget.textContent || '未命名';
-    if (nextTitle === getNode(document, document.rootId).content) return;
+    if (nextTitle === getNodeContent(getNode(document, document.rootId))) return;
     store.execute(documentCommands.updateContent(document.rootId, nextTitle, { mergeKey: `outline-title:${document.rootId}` }));
   }, [document, store]);
 
@@ -229,7 +232,7 @@ export default function OutlineView({ store }: Props) {
           onChange={handleOutlinerChange}
           markdown={(text, item) => renderNodeContent(document, text, item)}
           readonly={false}
-          fileName={getNode(document, document.rootId).content}
+          fileName={getNodeContent(getNode(document, document.rootId))}
           i18n={{
             menuTitle: '主题操作',
             outdent: '提升层级',

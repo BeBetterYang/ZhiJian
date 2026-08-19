@@ -44,14 +44,14 @@ import {
   deleteServerMap, loadServerJson, loginAccount, logoutAccount, registerAccount, saveServerJson,
   updateAccountPassword, updateAccountProfile,
 } from './serverStorage';
-import type { ZhiJianDocument } from './features/editor/core';
+import { getNodeContent, type ZhiJianDocument } from './features/editor/core';
 import {
   getLocalDocumentStorageKey,
   loadLocalDocument,
   parsePersistedDocument,
 } from './features/editor/persistence';
 
-const MindMapEditor = lazy(() => import('./MindMapEditor'));
+const EditorContainer = lazy(() => import('./features/editor/EditorContainer'));
 
 const STORAGE_USER = 'mindflow-user';
 const STORAGE_SESSION = 'mindflow-session';
@@ -488,16 +488,16 @@ function getSearchExcerpt(text: string, query: string) {
 function collectDocumentSearchHits(document: ZhiJianDocument, query: string, nodeId = document.rootId, paths: string[] = [], hits: MapSearchHit[] = []) {
   const node = document.nodes[nodeId];
   if (!node) return hits;
-  const textParts: unknown[] = [node.content, node.note];
-  node.table?.rows.forEach((row) => row.forEach((cell) => textParts.push(cell)));
+  const textParts: unknown[] = [getNodeContent(node), node.kind === 'content' ? node.description : undefined];
+  if (node.kind === 'table') node.table.rows.forEach((row) => row.forEach((cell) => textParts.push(cell)));
   const text = textParts.map(getSearchText).filter(Boolean).join(' ');
-  const nodeText = getSearchText(node.content);
+  const nodeText = getSearchText(getNodeContent(node));
   if (nodeId !== document.rootId && text.toLocaleLowerCase().includes(query.toLocaleLowerCase())) {
     hits.push({ path: paths.join(' > '), text: getSearchExcerpt(text, query), nodeText });
   }
   node.children.forEach((childId) => {
     const child = document.nodes[childId];
-    collectDocumentSearchHits(document, query, childId, [...paths, getSearchText(child?.content) || childId], hits);
+    collectDocumentSearchHits(document, query, childId, [...paths, (child ? getSearchText(getNodeContent(child)) : '') || childId], hits);
   });
   return hits;
 }
@@ -1118,7 +1118,7 @@ function WorkspacePage() {
         {mapId ? (
           <Content className="workspace-editor-content">
             <Suspense fallback={<div className="editor-loading"><Spin size={32} tip="正在加载导图编辑器…" /></div>}>
-              <MindMapEditor
+              <EditorContainer
                 key={mapId}
                 mapId={mapId}
                 title={activeMap?.title ?? '未命名导图'}

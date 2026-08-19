@@ -1,12 +1,12 @@
 import {
   createDocument,
   createId,
+  createNode,
   type CreateNodeInput,
   type NodeId,
   type ZhiJianContentBlockType,
   type ZhiJianDocument,
   type ZhiJianImage,
-  type ZhiJianNode,
 } from '../core';
 import {
   isMarkdownTableSeparator,
@@ -30,7 +30,7 @@ function parseContentBlock(raw: string): Pick<CreateNodeInput, 'content' | 'bloc
   let todo: CreateNodeInput['todo'];
   const todoMatch = source.match(todoPattern);
   if (todoMatch) {
-    todo = { enabled: true, checked: todoMatch[1].toLowerCase() === 'x' };
+    todo = { checked: todoMatch[1].toLowerCase() === 'x' };
     source = todoMatch[2].trim();
   }
   const heading = source.match(/^(#{1,3})\s+(.+)$/);
@@ -41,27 +41,11 @@ function parseContentBlock(raw: string): Pick<CreateNodeInput, 'content' | 'bloc
   return { content, blockType, todo };
 }
 
-function createParsedNode(input: CreateNodeInput & { id: NodeId; parentId: NodeId }): ZhiJianNode {
-  return {
-    id: input.id,
-    parentId: input.parentId,
-    children: [],
-    content: input.content ?? '',
-    blockType: input.blockType ?? 'text',
-    todo: input.todo,
-    note: input.note,
-    images: input.images,
-    table: input.table,
-    style: input.style,
-    clozes: input.clozes,
-  };
-}
-
 function appendNode(document: ZhiJianDocument, parentId: NodeId, input: CreateNodeInput): NodeId {
   const id = input.id ?? createId();
   const parent = document.nodes[parentId];
   if (!parent) throw new Error(`Parent "${parentId}" does not exist.`);
-  document.nodes[id] = createParsedNode({ ...input, id, parentId });
+  document.nodes[id] = createNode({ ...input, id, parentId });
   document.nodes[parentId] = {
     ...parent,
     children: [...parent.children, id],
@@ -69,19 +53,20 @@ function appendNode(document: ZhiJianDocument, parentId: NodeId, input: CreateNo
   return id;
 }
 
-function appendNote(document: ZhiJianDocument, nodeId: NodeId, noteLines: string[]): void {
+function appendDescription(document: ZhiJianDocument, nodeId: NodeId, descriptionLines: string[]): void {
   const node = document.nodes[nodeId];
-  const nextNote = noteLines.map((line) => stripDangerousInlineHtml(line)).join('\n').trim();
-  if (!node || !nextNote) return;
+  if (!node || node.kind !== 'content') return;
+  const nextDescription = descriptionLines.map((line) => stripDangerousInlineHtml(line)).join('\n').trim();
+  if (!nextDescription) return;
   document.nodes[nodeId] = {
     ...node,
-    note: node.note ? `${node.note}\n${nextNote}` : nextNote,
+    description: node.description ? `${node.description}\n${nextDescription}` : nextDescription,
   };
 }
 
 function appendImage(document: ZhiJianDocument, nodeId: NodeId, alt: string, url: string): void {
   const node = document.nodes[nodeId];
-  if (!node) return;
+  if (!node || node.kind !== 'content') return;
   const image: ZhiJianImage = {
     id: createId(),
     url: sanitizeMarkdownUrl(url),
@@ -93,17 +78,12 @@ function appendImage(document: ZhiJianDocument, nodeId: NodeId, alt: string, url
   };
 }
 
-function appendTable(document: ZhiJianDocument, nodeId: NodeId, tableLines: string[]): void {
-  const node = document.nodes[nodeId];
-  if (!node) return;
+function appendTableNode(document: ZhiJianDocument, parentId: NodeId, tableLines: string[]): NodeId | null {
   const rows = tableLines
     .map(splitMarkdownTableRow)
     .filter((cells) => !isMarkdownTableSeparator(cells));
-  if (rows.length === 0) return;
-  document.nodes[nodeId] = {
-    ...node,
-    table: { rows },
-  };
+  if (rows.length === 0) return null;
+  return appendNode(document, parentId, { id: createId(), kind: 'table', table: { rows } });
 }
 
 export function parseMarkdown(markdown: string, options: ParseMarkdownOptions = {}): ZhiJianDocument {
@@ -125,8 +105,8 @@ export function parseMarkdown(markdown: string, options: ParseMarkdownOptions = 
     if (!trimmed) continue;
     if (index === firstHeadingIndex) continue;
 
-    const note = raw.match(/^\s*>\s?(.*)$/);
-    if (note) {
+    const description = raw.match(/^\s*>\s?(.*)$/);
+    if (description) {
       const quoteLines: string[] = [];
       while (index < lines.length) {
         const quote = lines[index].match(/^\s*>\s?(.*)$/);
@@ -135,7 +115,7 @@ export function parseMarkdown(markdown: string, options: ParseMarkdownOptions = 
         index += 1;
       }
       index -= 1;
-      appendNote(document, lastNodeId, quoteLines);
+      appendDescription(document, lastNodeId, quoteLines);
       continue;
     }
 
@@ -146,13 +126,21 @@ export function parseMarkdown(markdown: string, options: ParseMarkdownOptions = 
     }
 
     if (/^\|.*\|$/.test(trimmed)) {
+      const startIndent = raw.match(/^(\s*)/)?.[1] ?? '';
+      const level = Math.floor(startIndent.replaceAll('\t', '  ').length / 2);
       const tableLines: string[] = [];
       while (index < lines.length && /^\s*\|.*\|\s*$/.test(lines[index])) {
         tableLines.push(lines[index].trim());
         index += 1;
       }
       index -= 1;
-      appendTable(document, lastNodeId, tableLines);
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) stack.pop();
+      const parentId = stack[stack.length - 1]?.nodeId ?? document.rootId;
+      const tableId = appendTableNode(document, parentId, tableLines);
+      if (tableId) {
+        stack.push({ level, nodeId: tableId });
+        lastNodeId = tableId;
+      }
       continue;
     }
 

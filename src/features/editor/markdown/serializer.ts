@@ -1,25 +1,25 @@
-import type { NodeId, ZhiJianDocument, ZhiJianNode } from '../core';
+import { isContentNode, type ContentNode, type NodeId, type TableNode, type ZhiJianDocument } from '../core';
 import { escapeMarkdownTableCell, sanitizeMarkdownUrl, stripDangerousInlineHtml } from './inlineMarkdown';
 
-function headingPrefix(node: ZhiJianNode): string {
+function headingPrefix(node: ContentNode): string {
   if (node.blockType === 'heading1') return '# ';
   if (node.blockType === 'heading2') return '## ';
   if (node.blockType === 'heading3') return '### ';
   return '';
 }
 
-function todoPrefix(node: ZhiJianNode): string {
-  if (!node.todo?.enabled) return '';
+function todoPrefix(node: ContentNode): string {
+  if (!node.todo) return '';
   return node.todo.checked ? '[x] ' : '[ ] ';
 }
 
-function serializeNodeLine(node: ZhiJianNode): string {
+function serializeContentLine(node: ContentNode): string {
   return `${todoPrefix(node)}${headingPrefix(node)}${stripDangerousInlineHtml(node.content)}`.trim();
 }
 
-function appendAttachments(lines: string[], node: ZhiJianNode, indent: string): void {
-  if (node.note) {
-    stripDangerousInlineHtml(node.note).split('\n').forEach((line) => lines.push(`${indent}> ${line}`));
+function appendContentAttachments(lines: string[], node: ContentNode, indent: string): void {
+  if (node.description) {
+    stripDangerousInlineHtml(node.description).split('\n').forEach((line) => lines.push(`${indent}> ${line}`));
   }
   if (node.images?.length) {
     node.images.forEach((image, index) => {
@@ -27,21 +27,29 @@ function appendAttachments(lines: string[], node: ZhiJianNode, indent: string): 
       lines.push(`${indent}![${alt}](${sanitizeMarkdownUrl(image.url)})`);
     });
   }
-  if (node.table?.rows.length) {
-    const columns = Math.max(1, ...node.table.rows.map((row) => row.length));
-    const rows = node.table.rows.map((row) => Array.from({ length: columns }, (_, column) => escapeMarkdownTableCell(stripDangerousInlineHtml(row[column] ?? ''))));
-    lines.push(`${indent}| ${rows[0].join(' | ')} |`);
-    lines.push(`${indent}| ${Array.from({ length: columns }, () => '---').join(' | ')} |`);
-    rows.slice(1).forEach((row) => lines.push(`${indent}| ${row.join(' | ')} |`));
-  }
+}
+
+function serializeTableBlock(lines: string[], node: TableNode, indent: string): void {
+  const sourceRows = node.table.rows;
+  if (sourceRows.length === 0) return;
+  const columns = Math.max(1, ...sourceRows.map((row) => row.length));
+  const rows = sourceRows.map((row) =>
+    Array.from({ length: columns }, (_, column) => escapeMarkdownTableCell(stripDangerousInlineHtml(row[column] ?? ''))));
+  lines.push(`${indent}| ${rows[0].join(' | ')} |`);
+  lines.push(`${indent}| ${Array.from({ length: columns }, () => '---').join(' | ')} |`);
+  rows.slice(1).forEach((row) => lines.push(`${indent}| ${row.join(' | ')} |`));
 }
 
 function serializeDescendant(document: ZhiJianDocument, nodeId: NodeId, depth: number, lines: string[]): void {
   const node = document.nodes[nodeId];
   if (!node) return;
   const indent = '  '.repeat(depth);
-  lines.push(`${indent}- ${serializeNodeLine(node)}`);
-  appendAttachments(lines, node, `${indent}  `);
+  if (node.kind === 'table') {
+    serializeTableBlock(lines, node, indent);
+  } else {
+    lines.push(`${indent}- ${serializeContentLine(node)}`);
+    appendContentAttachments(lines, node, `${indent}  `);
+  }
   node.children.forEach((childId) => serializeDescendant(document, childId, depth + 1, lines));
 }
 
@@ -49,16 +57,21 @@ function serializeDescendant(document: ZhiJianDocument, nodeId: NodeId, depth: n
 function serializeRootChild(document: ZhiJianDocument, nodeId: NodeId, lines: string[]): void {
   const node = document.nodes[nodeId];
   if (!node) return;
-  lines.push(serializeNodeLine(node));
-  appendAttachments(lines, node, '');
+  if (node.kind === 'table') {
+    serializeTableBlock(lines, node, '');
+  } else {
+    lines.push(serializeContentLine(node));
+    appendContentAttachments(lines, node, '');
+  }
   node.children.forEach((childId) => serializeDescendant(document, childId, 0, lines));
 }
 
 export function serializeMarkdown(document: ZhiJianDocument): string {
   const root = document.nodes[document.rootId];
-  const lines = [`# ${stripDangerousInlineHtml(root?.content || document.title || '未命名')}`, ''];
-  appendAttachments(lines, root, '');
-  root.children.forEach((childId) => {
+  const rootContent = root && isContentNode(root) ? root.content : '';
+  const lines = [`# ${stripDangerousInlineHtml(rootContent || document.title || '未命名')}`, ''];
+  if (root && isContentNode(root)) appendContentAttachments(lines, root, '');
+  root?.children.forEach((childId) => {
     serializeRootChild(document, childId, lines);
     lines.push('');
   });

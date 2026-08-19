@@ -6,6 +6,7 @@ export interface TreeValidationIssue {
     | 'ROOT_PARENT_INVALID'
     | 'ROOT_BLOCK_TYPE_INVALID'
     | 'CONTENT_BLOCK_TYPE_INVALID'
+    | 'TABLE_NODE_INVALID'
     | 'NODE_ID_MISMATCH'
     | 'PARENT_MISSING'
     | 'CHILD_MISSING'
@@ -44,10 +45,10 @@ export function validateDocument(document: ZhiJianDocument): TreeValidationResul
     });
   }
 
-  if (root.blockType !== 'root') {
+  if (root.kind !== 'content' || root.blockType !== 'root') {
     issues.push({
       code: 'ROOT_BLOCK_TYPE_INVALID',
-      message: 'Root node must use the special root block type.',
+      message: 'Root node must be a content node using the special root block type.',
       nodeId: root.id,
     });
   }
@@ -61,12 +62,24 @@ export function validateDocument(document: ZhiJianDocument): TreeValidationResul
       });
     }
 
-    if (node.id !== document.rootId && node.blockType === 'root') {
-      issues.push({
-        code: 'CONTENT_BLOCK_TYPE_INVALID',
-        message: 'Only the document root may use the root block type.',
-        nodeId: node.id,
-      });
+    if (node.kind === 'content') {
+      if (node.id !== document.rootId && node.blockType === 'root') {
+        issues.push({
+          code: 'CONTENT_BLOCK_TYPE_INVALID',
+          message: 'Only the document root may use the root block type.',
+          nodeId: node.id,
+        });
+      }
+    } else {
+      if (node.id === document.rootId) {
+        // Root-kind mismatch is already reported by ROOT_BLOCK_TYPE_INVALID.
+      } else if (!node.table || !Array.isArray(node.table.rows)) {
+        issues.push({
+          code: 'TABLE_NODE_INVALID',
+          message: `Table node "${node.id}" must carry a table with rows.`,
+          nodeId: node.id,
+        });
+      }
     }
 
     if (node.parentId !== null && !document.nodes[node.parentId]) {

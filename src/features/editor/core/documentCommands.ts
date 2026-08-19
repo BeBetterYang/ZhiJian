@@ -17,10 +17,13 @@ export type DocumentCommand =
   | { type: 'setTodo'; nodeId: NodeId; todo?: ZhiJianTodo }
   | { type: 'toggleTodo'; nodeId: NodeId }
   | { type: 'setTodoChecked'; nodeId: NodeId; checked: boolean }
-  | { type: 'setNote'; nodeId: NodeId; note?: string }
+  | { type: 'setDescription'; nodeId: NodeId; description?: string }
+  | { type: 'removeDescription'; nodeId: NodeId }
   | { type: 'setImages'; nodeId: NodeId; images?: ZhiJianImage[] }
-  | { type: 'setTable'; nodeId: NodeId; table?: ZhiJianTable }
   | { type: 'setStyle'; nodeId: NodeId; style?: ZhiJianNodeStyle }
+  | { type: 'convertToTable'; nodeId: NodeId; table?: ZhiJianTable }
+  | { type: 'insertSiblingTable'; nodeId: NodeId; newNodeId?: NodeId; table?: ZhiJianTable }
+  | { type: 'updateTable'; nodeId: NodeId; table: ZhiJianTable }
   | { type: 'splitNode'; nodeId: NodeId; offset: number; newNodeId?: NodeId }
   | { type: 'mergeNode'; nodeId: NodeId; targetNodeId?: NodeId }
   | { type: 'indentNode'; nodeId: NodeId }
@@ -29,6 +32,12 @@ export type DocumentCommand =
 
 export const documentCommands = {
   createNode: (input: Extract<DocumentCommand, { type: 'createNode' }>): DocumentCommand => input,
+  createChild: (parentId: NodeId, node?: CreateNodeInput, index?: number): DocumentCommand => ({
+    type: 'createNode',
+    parentId,
+    index,
+    node,
+  }),
   deleteNode: (nodeId: NodeId): DocumentCommand => ({ type: 'deleteNode', nodeId }),
   moveNode: (input: Omit<Extract<DocumentCommand, { type: 'moveNode' }>, 'type'>): DocumentCommand => ({
     type: 'moveNode',
@@ -47,10 +56,18 @@ export const documentCommands = {
   setTodo: (nodeId: NodeId, todo?: ZhiJianTodo): DocumentCommand => ({ type: 'setTodo', nodeId, todo }),
   toggleTodo: (nodeId: NodeId): DocumentCommand => ({ type: 'toggleTodo', nodeId }),
   setTodoChecked: (nodeId: NodeId, checked: boolean): DocumentCommand => ({ type: 'setTodoChecked', nodeId, checked }),
-  setNote: (nodeId: NodeId, note?: string): DocumentCommand => ({ type: 'setNote', nodeId, note }),
+  setDescription: (nodeId: NodeId, description?: string): DocumentCommand => ({ type: 'setDescription', nodeId, description }),
+  removeDescription: (nodeId: NodeId): DocumentCommand => ({ type: 'removeDescription', nodeId }),
   setImages: (nodeId: NodeId, images?: ZhiJianImage[]): DocumentCommand => ({ type: 'setImages', nodeId, images }),
-  setTable: (nodeId: NodeId, table?: ZhiJianTable): DocumentCommand => ({ type: 'setTable', nodeId, table }),
   setStyle: (nodeId: NodeId, style?: ZhiJianNodeStyle): DocumentCommand => ({ type: 'setStyle', nodeId, style }),
+  convertToTable: (nodeId: NodeId, table?: ZhiJianTable): DocumentCommand => ({ type: 'convertToTable', nodeId, table }),
+  insertSiblingTable: (nodeId: NodeId, newNodeId?: NodeId, table?: ZhiJianTable): DocumentCommand => ({
+    type: 'insertSiblingTable',
+    nodeId,
+    newNodeId,
+    table,
+  }),
+  updateTable: (nodeId: NodeId, table: ZhiJianTable): DocumentCommand => ({ type: 'updateTable', nodeId, table }),
   splitNode: (nodeId: NodeId, offset: number, newNodeId?: NodeId): DocumentCommand => ({
     type: 'splitNode',
     nodeId,

@@ -1,7 +1,10 @@
 import {
+  createEmptyTable,
   createId,
   createNode,
+  type ContentNode,
   type NodeId,
+  type TableNode,
   type ZhiJianContentBlockType,
   type ZhiJianDocument,
   type ZhiJianNode,
@@ -33,8 +36,10 @@ function insertChild(parent: ZhiJianNode, nodeId: NodeId, index = parent.childre
   return { ...parent, children };
 }
 
-function updateNode(document: ZhiJianDocument, nodeId: NodeId, updater: (node: ZhiJianNode) => ZhiJianNode) {
-  return replaceNode(document, updater(getNode(document, nodeId)));
+function requireContentNode(document: ZhiJianDocument, nodeId: NodeId): ContentNode {
+  const node = getNode(document, nodeId);
+  if (node.kind !== 'content') throw new Error(`Node "${nodeId}" is not a content node.`);
+  return node;
 }
 
 function applyMoveNode(document: ZhiJianDocument, nodeId: NodeId, parentId: NodeId, index: number): ZhiJianDocument {
@@ -96,46 +101,102 @@ export function reduceDocument(
     case 'moveNode':
       nextDocument = applyMoveNode(document, command.nodeId, command.parentId, command.index);
       break;
-    case 'updateContent':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, content: command.content }));
+    case 'updateContent': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, content: command.content });
       if (command.nodeId === document.rootId) {
         nextDocument = { ...nextDocument, title: command.content };
       }
       break;
-    case 'setBlockType':
+    }
+    case 'setBlockType': {
       if (command.nodeId === document.rootId) throw new Error('Root node block type cannot be changed.');
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, blockType: command.blockType }));
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, blockType: command.blockType });
       break;
-    case 'setTodo':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, todo: command.todo }));
+    }
+    case 'setTodo': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, todo: command.todo });
       break;
-    case 'toggleTodo':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({
-        ...node,
-        todo: node.todo ? undefined : { enabled: true, checked: false },
-      }));
+    }
+    case 'toggleTodo': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, todo: node.todo ? undefined : { checked: false } });
       break;
-    case 'setTodoChecked':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({
-        ...node,
-        todo: { enabled: true, checked: command.checked },
-      }));
+    }
+    case 'setTodoChecked': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, todo: { checked: command.checked } });
       break;
-    case 'setNote':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, note: command.note }));
+    }
+    case 'setDescription': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, description: command.description });
       break;
-    case 'setImages':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, images: command.images }));
+    }
+    case 'removeDescription': {
+      const node = requireContentNode(document, command.nodeId);
+      if (node.description === undefined) break;
+      const next: ContentNode = { ...node };
+      delete next.description;
+      nextDocument = replaceNode(document, next);
       break;
-    case 'setTable':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, table: command.table }));
+    }
+    case 'setImages': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, images: command.images });
       break;
-    case 'setStyle':
-      nextDocument = updateNode(document, command.nodeId, (node) => ({ ...node, style: command.style }));
+    }
+    case 'setStyle': {
+      const node = requireContentNode(document, command.nodeId);
+      nextDocument = replaceNode(document, { ...node, style: command.style });
       break;
+    }
+    case 'convertToTable': {
+      if (command.nodeId === document.rootId) throw new Error('Root node cannot be converted to a table.');
+      const node = getNode(document, command.nodeId);
+      const tableNode: TableNode = {
+        id: node.id,
+        parentId: node.parentId,
+        children: node.children,
+        kind: 'table',
+        table: command.table ?? createEmptyTable(),
+      };
+      nextDocument = replaceNode(document, tableNode);
+      break;
+    }
+    case 'insertSiblingTable': {
+      const node = getNode(document, command.nodeId);
+      const parent = getParent(document, command.nodeId);
+      if (!parent) throw new Error('Cannot insert a sibling table next to the root node.');
+      const tableNode = createNode({
+        id: command.newNodeId ?? createId(),
+        parentId: parent.id,
+        kind: 'table',
+        table: command.table,
+      });
+      if (document.nodes[tableNode.id]) throw new Error(`Node "${tableNode.id}" already exists.`);
+      const index = parent.children.indexOf(node.id) + 1;
+      nextDocument = {
+        ...document,
+        nodes: {
+          ...document.nodes,
+          [parent.id]: insertChild(parent, tableNode.id, index),
+          [tableNode.id]: tableNode,
+        },
+      };
+      break;
+    }
+    case 'updateTable': {
+      const node = getNode(document, command.nodeId);
+      if (node.kind !== 'table') throw new Error(`Node "${command.nodeId}" is not a table node.`);
+      nextDocument = replaceNode(document, { ...node, table: command.table });
+      break;
+    }
     case 'splitNode': {
       if (command.nodeId === document.rootId) throw new Error('Root node content cannot be split into siblings.');
-      const node = getNode(document, command.nodeId);
+      const node = requireContentNode(document, command.nodeId);
       const parent = getParent(document, command.nodeId);
       if (!parent) throw new Error('Non-root node must have a parent.');
       const offset = Math.max(0, Math.min(command.offset, node.content.length));
@@ -160,13 +221,14 @@ export function reduceDocument(
     }
     case 'mergeNode': {
       if (command.nodeId === document.rootId) throw new Error('Root node cannot be merged into another node.');
-      const source = getNode(document, command.nodeId);
+      const source = requireContentNode(document, command.nodeId);
       const targetId = command.targetNodeId ?? getPreviousVisibleNodeId(document, command.nodeId);
       if (!targetId) throw new Error('No previous node exists for merge.');
       if (targetId === source.id || isDescendant(document, source.id, targetId)) {
         throw new Error('Invalid merge target.');
       }
       const target = getNode(document, targetId);
+      if (target.kind !== 'content') throw new Error('Merge target must be a content node.');
       nextDocument = replaceNode(document, { ...target, content: `${target.content}${source.content}` });
       const sourceChildren = [...source.children];
       sourceChildren.forEach((childId, offset) => {

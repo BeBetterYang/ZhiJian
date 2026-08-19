@@ -3,7 +3,9 @@ import {
   createId,
   documentCommands,
   getNode,
+  getNodeContent,
   getParent,
+  isContentNode,
   type DocumentCommand,
   type NodeId,
   type ZhiJianDocument,
@@ -40,17 +42,17 @@ export function documentToOutlinerData(
 }
 
 export function getOutlineTitle(document: ZhiJianDocument, viewState: OutlineViewState): string {
-  return getNode(document, viewState.focusNodeId ?? document.rootId).content || '未命名';
+  return getNodeContent(getNode(document, viewState.focusNodeId ?? document.rootId)) || '未命名';
 }
 
 export function getOutlineBreadcrumb(document: ZhiJianDocument, focusNodeId: NodeId | null) {
   const path: Array<{ id: NodeId; content: string }> = [];
   let current: ZhiJianNode | null = focusNodeId ? getNode(document, focusNodeId) : null;
   while (current) {
-    path.unshift({ id: current.id, content: current.content || '未命名' });
+    path.unshift({ id: current.id, content: getNodeContent(current) || '未命名' });
     current = current.parentId ? getNode(document, current.parentId) : null;
   }
-  return [{ id: document.rootId, content: getNode(document, document.rootId).content || '未命名' }, ...path.filter((item) => item.id !== document.rootId)];
+  return [{ id: document.rootId, content: getNodeContent(getNode(document, document.rootId)) || '未命名' }, ...path.filter((item) => item.id !== document.rootId)];
 }
 
 function nodeToOutlinerData(document: ZhiJianDocument, nodeId: NodeId, viewState: OutlineViewState): OutlinerNode {
@@ -58,7 +60,7 @@ function nodeToOutlinerData(document: ZhiJianDocument, nodeId: NodeId, viewState
   const children = node.children.map((childId) => nodeToOutlinerData(document, childId, viewState));
   return {
     id: node.id,
-    topic: node.content,
+    topic: getNodeContent(node),
     expanded: isExpanded(viewState, node.id, children.length > 0),
     children,
   };
@@ -117,7 +119,7 @@ function findSplit(
     if (!knownIds.has(previousSibling.id)) continue;
     const previousNode = document.nodes[previousSibling.id];
     if (!previousNode) continue;
-    if (previousNode.content === `${previousSibling.topic}${item.topic}`) {
+    if (getNodeContent(previousNode) === `${previousSibling.topic}${item.topic}`) {
       return {
         nodeId: previousSibling.id,
         offset: previousSibling.topic.length,
@@ -192,7 +194,7 @@ export function diffOutlinerChangeToCommands(input: {
     if (deletedIds.has(nodeId)) return;
     if (split?.nodeId === nodeId) return;
     const currentNode = document.nodes[nodeId];
-    if (currentNode && currentNode.content !== next.topic) {
+    if (currentNode && isContentNode(currentNode) && currentNode.content !== next.topic) {
       commands.push(documentCommands.updateContent(nodeId, next.topic, { mergeKey: `outline-content:${nodeId}` }));
     }
   });

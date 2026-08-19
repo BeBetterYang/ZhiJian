@@ -3,6 +3,7 @@ import {
   createDocument,
   createDocumentStore,
   documentCommands,
+  getNodeContent,
 } from '../../core';
 import {
   parsePersistedDocument,
@@ -16,7 +17,7 @@ describe('document persistence', () => {
 
     expect(persisted.schemaVersion).toBe(1);
     expect(persisted.document.schemaVersion).toBe(1);
-    expect(persisted.document.nodes.root.content).toBe('Root');
+    expect(getNodeContent(persisted.document.nodes.root)).toBe('Root');
   });
 
   it('validates loaded persisted documents', () => {
@@ -34,7 +35,7 @@ describe('document persistence', () => {
     store.replaceDocument(incoming, { resetHistory: true, dirty: false, recordHistory: false });
 
     expect(store.getSnapshot().document.rootId).toBe('root2');
-    expect(store.getSnapshot().document.nodes.root2.content).toBe('Loaded');
+    expect(getNodeContent(store.getDocument().nodes.root2)).toBe('Loaded');
     expect(store.getSnapshot().dirty).toBe(false);
     expect(store.getSnapshot().history.undoStack).toHaveLength(0);
   });

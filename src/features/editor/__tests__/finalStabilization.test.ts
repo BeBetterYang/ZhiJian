@@ -7,10 +7,10 @@ import {
   validateDocument,
   type ZhiJianDocument,
 } from '../core';
-import { documentToMindMapData } from '../mindmap';
 import { serializeMarkdown, parseMarkdown } from '../markdown';
 import { parsePersistedDocument, toPersistedDocument } from '../persistence';
-import { applyMindMapDataChange } from '../mindmap/mindMapEvents';
+import { documentToOutlinerData } from '../outline/outlineAdapter';
+import { createOutlineViewState } from '../outline/outlineViewState';
 
 function createWideDocument(count: number): ZhiJianDocument {
   let document = createDocument({ id: `wide-${count}`, rootId: 'root', title: 'Wide', now: 1 });
@@ -40,12 +40,14 @@ function createDeepDocument(depth: number): ZhiJianDocument {
 }
 
 describe('final architecture stabilization', () => {
-  it('keeps document stable across 500 view switches', () => {
+  it('keeps document stable across 500 view projections', () => {
     const store = createDocumentStore(createWideDocument(100));
     const snapshot = store.getSnapshot();
+    const document = store.getDocument();
+    const viewState = createOutlineViewState(document);
 
     for (let index = 0; index < 500; index += 1) {
-      documentToMindMapData(store.getSnapshot().document);
+      documentToOutlinerData(document, viewState);
     }
 
     expect(store.getSnapshot()).toBe(snapshot);
@@ -80,7 +82,8 @@ describe('final architecture stabilization', () => {
 
     expect(validateDocument(document).valid).toBe(true);
     expect(validateDocument(reloaded).valid).toBe(true);
-    expect(documentToMindMapData(document).children?.[0].data.uid).toBe('deep-0');
+    const data = documentToOutlinerData(document, createOutlineViewState(document));
+    expect(data[0].id).toBe('deep-0');
   });
 
   it('handles 1000 siblings', () => {
@@ -88,13 +91,13 @@ describe('final architecture stabilization', () => {
 
     expect(validateDocument(document).valid).toBe(true);
     expect(document.nodes.root.children).toHaveLength(1000);
-    expect(documentToMindMapData(document).children).toHaveLength(1000);
+    const data = documentToOutlinerData(document, createOutlineViewState(document));
+    expect(data).toHaveLength(1000);
   });
 
-  it('does not create a Store -> MindMap -> Store loop for 1000 store mutations', () => {
+  it('projects 1000 store mutations without feeding back into the store', () => {
     const store = createDocumentStore(createWideDocument(10));
-    const previousDataRef = { current: documentToMindMapData(store.getSnapshot().document) };
-    const isApplyingStoreUpdateRef = { current: true };
+    const viewState = createOutlineViewState(store.getDocument());
     let commandCount = 0;
     const unsubscribe = store.subscribe(() => {
       commandCount += 1;
@@ -104,13 +107,8 @@ describe('final architecture stabilization', () => {
       store.execute(documentCommands.updateContent(`node-${index % 10}`, `Mutation ${index}`), {
         mergeKey: `loop-${index}`,
       });
-      const data = documentToMindMapData(store.getSnapshot().document);
-      expect(applyMindMapDataChange({
-        store,
-        previousDataRef,
-        isApplyingStoreUpdateRef,
-        nextData: data,
-      })).toBe(false);
+      // 视图投影是纯读取：Document 是唯一数据源，投影绝不回写 Store
+      documentToOutlinerData(store.getDocument(), viewState);
     }
 
     unsubscribe();
@@ -127,14 +125,15 @@ describe('final architecture stabilization', () => {
         id: 'rich',
         content: 'Rich **bold**',
         blockType: 'heading1',
-        todo: { enabled: true, checked: true },
-        note: 'Note',
+        todo: { checked: true },
+        description: 'Note',
         images: [{ id: 'img', url: 'https://example.com/a.png', alt: 'A' }],
-        table: { rows: [['A', 'B'], ['1', '2']] },
         style: { color: '#165DFF', backgroundColor: '#E8F3FF' },
         clozes: [{ start: 0, end: 4 }],
       },
     }));
+    // 表格是独立的 TableNode，作为兄弟节点持久化
+    document = reduceDocument(document, documentCommands.insertSiblingTable('rich', 'rich-table', { rows: [['A', 'B'], ['1', '2']] }));
 
     const reloaded = parsePersistedDocument(toPersistedDocument(document));
 
