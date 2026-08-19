@@ -27,6 +27,12 @@ interface FocusState {
   offset?: number;
 }
 
+interface DragState {
+  sourceId: NodeId;
+  targetId: NodeId | null;
+  position: 'before' | 'after' | 'child';
+}
+
 export default function OutlineTreeView({
   store,
   viewState,
@@ -35,6 +41,7 @@ export default function OutlineTreeView({
   const snapshot = store.getSnapshot();
   const document = snapshot.document as ZhiJianDocument;
   const [focusState, setFocusState] = useState<FocusState | null>(null);
+  const [dragState, setDragState] = useState<DragState | null>(null);
   const editorRefs = useRef<Map<NodeId, NodeContentEditorHandle>>(new Map());
 
   const visibleRootId = viewState.focusNodeId ?? document.rootId;
@@ -185,6 +192,80 @@ export default function OutlineTreeView({
     }
   };
 
+  const handleDragStart = (nodeId: NodeId) => (event: React.DragEvent) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nodeId);
+    setDragState({ sourceId: nodeId, targetId: null, position: 'after' });
+  };
+
+  const handleDragOver = (nodeId: NodeId) => (event: React.DragEvent) => {
+    event.preventDefault();
+    if (!dragState || dragState.sourceId === nodeId) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    const height = rect.height;
+
+    let position: 'before' | 'after' | 'child' = 'after';
+    if (y < height * 0.25) {
+      position = 'before';
+    } else if (y > height * 0.75) {
+      position = 'after';
+    } else {
+      position = 'child';
+    }
+
+    setDragState({ sourceId: dragState.sourceId, targetId: nodeId, position });
+  };
+
+  const handleDragEnd = () => {
+    setDragState(null);
+  };
+
+  const handleDrop = (nodeId: NodeId) => (event: React.DragEvent) => {
+    event.preventDefault();
+    if (!dragState || dragState.sourceId === nodeId) {
+      setDragState(null);
+      return;
+    }
+
+    const sourceId = dragState.sourceId;
+    const targetId = nodeId;
+    const position = dragState.position;
+
+    // Prevent dropping on own descendant
+    let current: NodeId | undefined = targetId;
+    while (current) {
+      if (current === sourceId) {
+        setDragState(null);
+        return;
+      }
+      const parent = getParent(document, current);
+      current = parent?.id;
+    }
+
+    const targetParent = getParent(document, targetId);
+
+    if (position === 'child') {
+      // Move as first child
+      store.execute(documentCommands.moveNode({ nodeId: sourceId, parentId: targetId, index: 0 }));
+    } else if (position === 'before') {
+      // Move before target
+      if (targetParent) {
+        const index = targetParent.children.indexOf(targetId);
+        store.execute(documentCommands.moveNode({ nodeId: sourceId, parentId: targetParent.id, index }));
+      }
+    } else {
+      // Move after target
+      if (targetParent) {
+        const index = targetParent.children.indexOf(targetId);
+        store.execute(documentCommands.moveNode({ nodeId: sourceId, parentId: targetParent.id, index: index + 1 }));
+      }
+    }
+
+    setDragState(null);
+  };
+
   const renderNode = (nodeId: NodeId, depth: number): React.ReactElement | null => {
     const node = document.nodes[nodeId];
     if (!node) return null;
@@ -192,9 +273,26 @@ export default function OutlineTreeView({
     const hasChildren = node.children.length > 0;
     const isExpanded = hasChildren && viewState.expandedIds.has(nodeId);
     const isFocused = focusState?.nodeId === nodeId;
+    const isDragSource = dragState?.sourceId === nodeId;
+    const isDragTarget = dragState?.targetId === nodeId;
+
+    const itemClasses = ['zj-outline-tree-item'];
+    if (isDragSource) itemClasses.push('dragging');
+    if (isDragTarget && dragState) {
+      itemClasses.push(`drop-${dragState.position}`);
+    }
 
     return (
-      <div key={nodeId} className="zj-outline-tree-item" style={{ paddingLeft: depth * 20 }}>
+      <div
+        key={nodeId}
+        className={itemClasses.join(' ')}
+        style={{ paddingLeft: depth * 20 }}
+        draggable
+        onDragStart={handleDragStart(nodeId)}
+        onDragOver={handleDragOver(nodeId)}
+        onDragEnd={handleDragEnd}
+        onDrop={handleDrop(nodeId)}
+      >
         <div className="zj-outline-tree-node">
           {hasChildren && (
             <button

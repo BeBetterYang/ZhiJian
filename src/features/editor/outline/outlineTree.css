@@ -49,3 +49,39 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Drag and drop styles */
+.zj-outline-tree-item {
+  position: relative;
+}
+
+.zj-outline-tree-item.dragging {
+  opacity: 0.5;
+}
+
+.zj-outline-tree-item.drop-before::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #165DFF;
+  z-index: 10;
+}
+
+.zj-outline-tree-item.drop-after::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #165DFF;
+  z-index: 10;
+}
+
+.zj-outline-tree-item.drop-child > .zj-outline-tree-node {
+  background: rgba(22, 93, 255, 0.1);
+  border-radius: 4px;
+}

@@ -330,7 +330,7 @@ export const NodeContentEditor = forwardRef<NodeContentEditorHandle, NodeContent
     if (todo?.checked) contentClasses.push('is-done');
 
     // Cloze masking
-    const displayContent =
+    const maskedContent =
       clozes && clozes.length > 0
         ? content
             .split('')
@@ -339,6 +339,69 @@ export const NodeContentEditor = forwardRef<NodeContentEditorHandle, NodeContent
             )
             .join('')
         : content;
+
+    // Render rich content (markdown inline styles)
+    const renderRichContent = (text: string): React.ReactNode => {
+      const parts: React.ReactNode[] = [];
+      let remaining = text;
+      let key = 0;
+
+      while (remaining.length > 0) {
+        // Bold: **text** or __text__
+        const boldMatch = remaining.match(/^(\*\*|__)(.+?)\1/);
+        if (boldMatch) {
+          parts.push(<strong key={key++}>{boldMatch[2]}</strong>);
+          remaining = remaining.slice(boldMatch[0].length);
+          continue;
+        }
+
+        // Italic: *text* or _text_ (single, not double)
+        const italicMatch = remaining.match(/^(\*|_)(.+?)\1/);
+        if (italicMatch && !remaining.startsWith('**') && !remaining.startsWith('__')) {
+          parts.push(<em key={key++}>{italicMatch[2]}</em>);
+          remaining = remaining.slice(italicMatch[0].length);
+          continue;
+        }
+
+        // Inline code: `text`
+        const codeMatch = remaining.match(/^`([^`]+)`/);
+        if (codeMatch) {
+          parts.push(<code key={key++} className="zj-inline-code">{codeMatch[1]}</code>);
+          remaining = remaining.slice(codeMatch[0].length);
+          continue;
+        }
+
+        // Link: [text](url)
+        const linkMatch = remaining.match(/^\[([^\]]+)]\(([^)]+)\)/);
+        if (linkMatch) {
+          const url = linkMatch[2].trim();
+          const safeUrl = /^\s*javascript:/i.test(url) ? '#' : url;
+          parts.push(
+            <a key={key++} href={safeUrl} className="zj-inline-link" target="_blank" rel="noopener noreferrer">
+              {linkMatch[1]}
+            </a>
+          );
+          remaining = remaining.slice(linkMatch[0].length);
+          continue;
+        }
+
+        // Plain text: consume until next markdown marker
+        const nextMarker = remaining.search(/[*_`[]/);
+        if (nextMarker === -1) {
+          parts.push(remaining);
+          break;
+        } else if (nextMarker > 0) {
+          parts.push(remaining.slice(0, nextMarker));
+          remaining = remaining.slice(nextMarker);
+        } else {
+          // Marker at position 0 but no match - treat as literal
+          parts.push(remaining[0]);
+          remaining = remaining.slice(1);
+        }
+      }
+
+      return parts.length > 0 ? parts : text;
+    };
 
     return (
       <div className="zj-node-content-editor">
@@ -363,7 +426,7 @@ export const NodeContentEditor = forwardRef<NodeContentEditorHandle, NodeContent
           onCompositionEnd={handleCompositionEnd}
           style={style}
         >
-          {displayContent}
+          {renderRichContent(maskedContent)}
         </div>
         {description !== undefined && (
           <textarea
