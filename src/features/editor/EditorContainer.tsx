@@ -11,6 +11,7 @@ import {
 import { useDocumentStore } from './hooks/useDocumentStore';
 import { loadLocalDocument, loadServerDocument, useDocumentPersistence } from './persistence';
 import OutlineView from './outline/OutlineView';
+import MindMapView from './mindmap/MindMapView';
 import { TUTORIAL_MAP_ID, createTutorialDocument } from '../../tutorialData';
 
 export type EditorViewMode = 'mindmap' | 'outline';
@@ -136,11 +137,7 @@ export default function EditorContainer({
         {mode === 'outline' ? (
           <OutlineView store={store} />
         ) : (
-          <div className="zj-mindmap-placeholder" role="status">
-            <p className="zj-mindmap-placeholder-title">思维导图视图正在重建中</p>
-            <p className="zj-mindmap-placeholder-hint">请先切换到「大纲」视图进行编辑，导图视图会在后续阶段接入。</p>
-            <Button type="primary" onClick={() => changeMode('outline')}>切换到大纲视图</Button>
-          </div>
+          <MindMapView store={store} />
         )}
       </div>
     </div>
