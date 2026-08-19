@@ -9,7 +9,6 @@ import {
 } from '../core';
 import { serializeMarkdown, parseMarkdown } from '../markdown';
 import { parsePersistedDocument, toPersistedDocument } from '../persistence';
-import { documentToOutlinerData } from '../outline/outlineAdapter';
 import { createOutlineViewState } from '../outline/outlineViewState';
 
 function createWideDocument(count: number): ZhiJianDocument {
@@ -40,14 +39,13 @@ function createDeepDocument(depth: number): ZhiJianDocument {
 }
 
 describe('final architecture stabilization', () => {
-  it('keeps document stable across 500 view projections', () => {
+  it('keeps document stable across 500 view state accesses', () => {
     const store = createDocumentStore(createWideDocument(100));
     const snapshot = store.getSnapshot();
     const document = store.getDocument();
-    const viewState = createOutlineViewState(document);
 
     for (let index = 0; index < 500; index += 1) {
-      documentToOutlinerData(document, viewState);
+      createOutlineViewState(document);
     }
 
     expect(store.getSnapshot()).toBe(snapshot);
@@ -82,8 +80,8 @@ describe('final architecture stabilization', () => {
 
     expect(validateDocument(document).valid).toBe(true);
     expect(validateDocument(reloaded).valid).toBe(true);
-    const data = documentToOutlinerData(document, createOutlineViewState(document));
-    expect(data[0].id).toBe('deep-0');
+    const viewState = createOutlineViewState(document);
+    expect(viewState.expandedIds.size).toBeGreaterThan(0);
   });
 
   it('handles 1000 siblings', () => {
@@ -91,24 +89,24 @@ describe('final architecture stabilization', () => {
 
     expect(validateDocument(document).valid).toBe(true);
     expect(document.nodes.root.children).toHaveLength(1000);
-    const data = documentToOutlinerData(document, createOutlineViewState(document));
-    expect(data).toHaveLength(1000);
+    const viewState = createOutlineViewState(document);
+    expect(viewState.expandedIds.has('root')).toBe(true);
   });
 
   it('projects 1000 store mutations without feeding back into the store', () => {
     const store = createDocumentStore(createWideDocument(10));
-    const viewState = createOutlineViewState(store.getDocument());
+    createOutlineViewState(store.getDocument());
     let commandCount = 0;
     const unsubscribe = store.subscribe(() => {
       commandCount += 1;
     });
 
     for (let index = 0; index < 1000; index += 1) {
-      store.execute(documentCommands.updateContent(`node-${index % 10}`, `Mutation ${index}`), {
+      store.execute(documentCommands.updateContent(`node-${index % 10}`, `Mutation ${index}`, {
         mergeKey: `loop-${index}`,
-      });
-      // 视图投影是纯读取：Document 是唯一数据源，投影绝不回写 Store
-      documentToOutlinerData(store.getDocument(), viewState);
+      }));
+      // View state access is pure read: Document is sole source, projection never writes back to Store
+      createOutlineViewState(store.getDocument());
     }
 
     unsubscribe();

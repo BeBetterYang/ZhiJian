@@ -1,0 +1,51 @@
+.zj-outline-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 0;
+}
+
+.zj-outline-tree-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.zj-outline-tree-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.zj-outline-tree-node:hover {
+  background-color: #F7F8FA;
+}
+
+.zj-outline-tree-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 4px;
+  color: #86909C;
+  font-size: 10px;
+  border-radius: 2px;
+}
+
+.zj-outline-tree-toggle:hover {
+  background-color: #E5E6EB;
+  color: #4E5969;
+}
+
+.zj-outline-tree-content {
+  flex: 1;
+  min-width: 0;
+}
